@@ -1,0 +1,10 @@
+.venv/
+weights/
+recordings/
+certs/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+config/cameras.json
+config/walls.json

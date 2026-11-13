@@ -1,0 +1,14 @@
+opencv-contrib-python
+numpy
+scipy
+filterpy
+ultralytics
+mediapipe
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+pillow
+reportlab
+elevenlabs
+google-genai

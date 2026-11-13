@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to walls.json. Wall segments on the floor plane in world metres (ID 0 marker = origin).",
+  "walls": [
+    {"id": "wall_a", "segment": [[1.0, 0.0], [1.0, 1.5]], "height_m": 1.2},
+    {"id": "wall_b", "segment": [[2.0, 2.0], [3.0, 2.0]], "height_m": 1.2}
+  ]
+}

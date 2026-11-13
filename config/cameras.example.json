@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy to cameras.json. K/dist from calib/intrinsics.py, R/t (world->camera) from calib/extrinsics.py. Units: metres.",
+  "cameras": [
+    {
+      "id": "cam1",
+      "source": 0,
+      "width": 1280,
+      "height": 720,
+      "K": [[0, 0, 0], [0, 0, 0], [0, 0, 1]],
+      "dist": [0, 0, 0, 0, 0],
+      "R": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      "t": [0, 0, 0]
+    },
+    {
+      "id": "cam2",
+      "source": "http://PHONE_IP:8080/video",
+      "width": 1280,
+      "height": 720,
+      "K": [[0, 0, 0], [0, 0, 0], [0, 0, 1]],
+      "dist": [0, 0, 0, 0, 0],
+      "R": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      "t": [0, 0, 0]
+    }
+  ]
+}
