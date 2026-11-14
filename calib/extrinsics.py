@@ -40,6 +40,9 @@ def marker_world_corners(m, size):
 def make_detector(dict_name):
     params = cv2.aruco.DetectorParameters()
     params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    # big/near markers at the image edge come out slightly curved (lens distortion) and fail the default
+    # squareness test (0.03); 0.08 finds them reliably. Unknown ids are ignored anyway.
+    params.polygonalApproxAccuracyRate = 0.08
     return cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICTS[dict_name]), params)
 
 
