@@ -30,14 +30,23 @@ from aiohttp import WSMsgType, web
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-PREDICT_AFTER_S = 0.5   # contract: 'predicted' when unseen for > 0.5 s
-DROP_AFTER_S = 10.0     # contract: dropped after 10 s unseen
+PREDICT_AFTER_S = 0.5   # 'predicted' when unseen for > 0.5 s
+DROP_PREDICTED_S = 8.0  # INTERFACE.md: drop once predicted for > ~8 s ...
+DROP_2SIGMA_M = 3.0     # ... or its 2-sigma radius exceeds ~3 m
+WORLD_VERSION = 1
 GATE_M = 1.0            # max distance from a seen track to accept a detection (+ 2 sigma while predicted)
 MEAS_SIGMA = 0.10       # m, detection noise
 GROWTH = 0.35           # m/s, sigma growth while predicted
 
-SIM_WORLD_WALLS = [{"a": [1.0, 0.0], "b": [1.0, 1.5], "h": 2.0}, {"a": [2.0, 2.0], "b": [3.0, 2.0], "h": 2.0}]
-SIM_CAMERA = {"id": "camA", "pos": [-0.5, -0.5, 1.5], "yaw": 45.0, "fov": 70.0}
+# --sim world = the browser mock (quest/src/mock.js): wall A at x=2.1, blind spot / PIR zone at x<1, y>0.3
+SIM_BLIND = [[-0.3, 0.3], [1.0, 0.3], [1.0, 2.0], [-0.3, 2.0]]
+SIM_WORLD = {
+    "walls": [{"a": [2.1, -0.6], "b": [2.1, 2.0], "h": 2.0}, {"a": [-0.4, 2.1], "b": [1.2, 2.1], "h": 2.0}],
+    "cameras": [{"id": "camA", "pos": [-0.6, -0.6, 1.5], "yaw": 45, "fov": 70},
+                {"id": "camB", "pos": [2.8, 0.8, 1.5], "yaw": 180, "fov": 70}],
+    "zones": [{"sensor": "pir1", "zone": SIM_BLIND}],
+    "objects": [{"id": "exit1", "type": "exit", "pos": [-0.6, 0.9], "size": [0.1, 0.9, 2.0], "label": "Fire exit"}],
+}
 
 
 # ---------------------------------------------------------------- world
@@ -59,18 +68,22 @@ def camera_pose(cam):
     return {"id": cam["id"], "pos": [round(v, 3) for v in pos], "yaw": round(yaw, 1), "fov": cam.get("fov", 70.0)}
 
 
+def align_points():
+    """The 4 corner markers from config/markers.json, in file order (= touch order round the area)."""
+    markers = (load_json(ROOT / "config" / "markers.json") or {}).get("markers", [])
+    return [{"id": f"m{m['id']}", "marker": m["id"], "pos": [m["x"], m["y"]]} for m in markers]
+
+
 def build_world(sim):
-    walls_cfg = load_json(ROOT / "config" / "walls.json") or load_json(ROOT / "config" / "walls.example.json") or {}
-    walls = walls_cfg.get("walls", [])
-    cams = []
-    for c in (load_json(ROOT / "config" / "cameras.json") or {}).get("cameras", []):
-        if all(k in c for k in ("R", "t")):
-            cams.append(camera_pose(c))
+    """World message per quest/INTERFACE.md section 2 (without "type"; /tracks wraps it)."""
     if sim:
-        walls = SIM_WORLD_WALLS
-        if not any(c["id"] == "camA" for c in cams):
-            cams.append(SIM_CAMERA)
-    return {"walls": walls, "cameras": cams, "zones": []}
+        world = dict(SIM_WORLD)
+    else:
+        walls_cfg = load_json(ROOT / "config" / "walls.json") or {}
+        cams = [camera_pose(c) for c in (load_json(ROOT / "config" / "cameras.json") or {}).get("cameras", [])
+                if all(k in c for k in ("R", "t"))]
+        world = {"walls": walls_cfg.get("walls", []), "cameras": cams, "zones": [], "objects": []}
+    return {"v": 1, "world_version": WORLD_VERSION, **world, "align_points": align_points()}
 
 
 # ---------------------------------------------------------------- tracker
@@ -135,6 +148,7 @@ class Track:
 class Tracker:
     def __init__(self):
         self.tracks = []
+        self.pir = {}  # sensor -> (active, t)
         self.lock = threading.Lock()
 
     def detection(self, cam, t, foot):
@@ -151,8 +165,10 @@ class Tracker:
             else:
                 self.tracks.append(Track(foot, t, cam))
 
-    def zone(self, t, zone, active):
-        """Active PIR zone: pull nearby predicted tracks towards its centroid (loose measurement)."""
+    def zone(self, sensor, t, zone, active):
+        """PIR state for the tracks message; an active zone pulls nearby predicted tracks to its centroid."""
+        with self.lock:
+            self.pir[sensor] = (bool(active), t)
         if not active or not zone:
             return
         c = [sum(p[0] for p in zone) / len(zone), sum(p[1] for p in zone) / len(zone)]
@@ -163,23 +179,35 @@ class Tracker:
 
     def snapshot(self, now):
         with self.lock:
-            self.tracks = [tr for tr in self.tracks if now - tr.last_seen <= DROP_AFTER_S]
+            self.tracks = [tr for tr in self.tracks
+                           if now - tr.last_seen - PREDICT_AFTER_S <= DROP_PREDICTED_S
+                           and 2 * math.sqrt(tr.sigma2(now)) <= DROP_2SIGMA_M]
             for tr in self.tracks:
                 tr.predict(now)
-            return {"t": round(now, 3), "tracks": [tr.msg(now) for tr in self.tracks]}
+            return {"type": "tracks", "v": 1, "t": round(now, 3), "world_version": WORLD_VERSION,
+                    "tracks": [tr.msg(now) for tr in self.tracks],
+                    "zones": [{"sensor": s, "active": a, "t": round(t, 3)} for s, (a, t) in self.pir.items()]}
 
 
 # ---------------------------------------------------------------- detection sources
 async def sim_camera(tracker):
-    """camA sees one person on an ellipse, except while they are behind the x=1 wall (x > 1.1)."""
-    c, rx, ry, period = (1.0, 0.75), 0.8, 0.5, 6.5
+    """Same loop as the browser mock: behind wall A (camB still sees them), through the blind spot
+    (no detections, PIR pir1 active), 2 laps then a 10 s gap with nobody there."""
+    c, rx, ry, lap, gap = (1.4, 0.8), 1.3, 1.0, 9.0, 10.0
+    in_blind = lambda x, y: -0.3 <= x <= 1.0 and 0.3 <= y <= 2.0
     t0 = time.time()
     while True:
         t = time.time()
-        a = 2 * math.pi * (t - t0) / period
-        x, y = c[0] + rx * math.cos(a), c[1] + ry * math.sin(a)
-        if x <= 1.1:
-            tracker.detection("camA", t, [x + random.gauss(0, 0.03), y + random.gauss(0, 0.03)])
+        ph = (t - t0) % (2 * lap + gap)
+        blind = False
+        if ph < 2 * lap:
+            a = 2 * math.pi * ph / lap
+            x, y = c[0] + rx * math.cos(a), c[1] + ry * math.sin(a)
+            blind = in_blind(x, y)
+            if not blind:
+                cam = "camB" if x > 2.1 else "camA"
+                tracker.detection(cam, t, [x + random.gauss(0, 0.03), y + random.gauss(0, 0.03)])
+        tracker.zone("pir1", t, SIM_BLIND, blind)
         await asyncio.sleep(0.1)  # ~10 fps camera
 
 
@@ -225,7 +253,8 @@ def make_app(args):
     async def ws_tracks(request):
         ws = web.WebSocketResponse(heartbeat=10)
         await ws.prepare(request)
-        await ws.send_json(world)
+        await ws.send_json({"type": "world", **world})
+        await ws.send_json(tracker.snapshot(time.time()))  # current snapshot immediately
         clients.add(ws)
         print(f"[bridge] /tracks client connected ({len(clients)})", flush=True)
         try:
@@ -247,7 +276,7 @@ def make_app(args):
                 if "foot" in d:
                     tracker.detection(d["cam"], float(d.get("t", time.time())), d["foot"])
                 elif "zone" in d:
-                    tracker.zone(float(d.get("t", time.time())), d["zone"], d.get("active", False))
+                    tracker.zone(d.get("sensor", "pir"), float(d.get("t", time.time())), d["zone"], d.get("active", False))
             except (ValueError, KeyError, TypeError) as e:
                 print("[bridge] bad ingest message:", e, m.data[:200], flush=True)
         return ws
