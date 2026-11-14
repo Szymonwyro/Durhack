@@ -59,14 +59,22 @@ loop();
 class Source:
     """Grabs frames in a background thread; keeps only the latest JPEG."""
 
-    def __init__(self, src, width, quality, raw=False):
+    def __init__(self, src, width, quality, raw=False, height=None):
         import cv2
         import numpy as np
         self.cv2, self.np = cv2, np
         self.width, self.quality, self.raw = width, quality, raw
         self.jpg, self.seq, self.lock = None, 0, threading.Condition()
         self.cap = cv2.VideoCapture(src)
-        ok = self.cap.isOpened() and self.cap.read()[0]
+        if height:  # ask the camera for the calibrated size (Windows often defaults to 640x480)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        ok, first = self.cap.read() if self.cap.isOpened() else (False, None)
+        if ok and height and (first.shape[1], first.shape[0]) != (width, height):
+            print(f"WARNING: camera gives {first.shape[1]}x{first.shape[0]}, not {width}x{height}; "
+                  f"frames will be resized and calibration (K) won't match", flush=True)
+        if not ok and raw:
+            raise SystemExit(f"camera {src} unavailable (wrong --source? Camera permission? in use by another app?)")
         self.kind = f"camera {src}" if ok else "synthetic frames (camera unavailable)"
         if not ok:
             self.cap.release()
@@ -108,7 +116,7 @@ class Source:
 
 
 def serve(args):
-    src = Source(args.source, args.width, args.quality, args.raw)
+    src = Source(args.source, args.width, args.quality, args.raw, args.height)
     served = {"frames": 0, "bytes": 0}
 
     class H(BaseHTTPRequestHandler):
@@ -212,6 +220,7 @@ def main():
     s = sub.add_parser("serve")
     s.add_argument("--source", type=int, default=1, help="OpenCV camera index (default 1 = MacBook camera here)")
     s.add_argument("--width", type=int, default=1280)
+    s.add_argument("--height", type=int, default=720, help="requested capture height (0 = camera default)")
     s.add_argument("--quality", type=int, default=80)
     s.add_argument("--port", type=int, default=8090)
     s.add_argument("--raw", action="store_true",
