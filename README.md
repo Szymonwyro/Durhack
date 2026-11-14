@@ -6,6 +6,8 @@
 
 Docs: [CONTRACTS](docs/CONTRACTS.md) · [PLAN](docs/PLAN.md) · [DEMO_SCRIPT](docs/DEMO_SCRIPT.md)
 
+IP : http://10.247.206.87:8000/
+
 ## Setup
 ```bash
 source .venv/bin/activate              # Python 3.11 (not 3.13: mediapipe)
