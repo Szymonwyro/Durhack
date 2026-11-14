@@ -1,16 +1,14 @@
-# Handoff: laptop 2 = fusion server + camB (for laptop 2's person / their AI)
+# Handoff: camB on laptop 2 (Caspar) → server on Mac-1 (for Caspar / his AI)
 
-> **Update ~20:00:** laptop 2 died, so **the server now runs on Mac-1 (`ws://10.247.46.145:8010`)**. When laptop 2 is
-> back, run **only the camB worker** there, sending to Mac-1: `--server ws://10.247.46.145:8010/ingest/camB`
-> (skip the server step). Redo camB's position first (step 3): the saved one is still from 640x480.
-> **Server changes Caspar should know about (Role 3):** `fusion/tracker.py` is now implemented (stable ids, Kalman,
-> visible/predicted, optional skeletons) and `fusion/server.py` feeds every camera frame into it; `/tracks` people
-> come from the tracker, other classes are grouped as before (ids ≥ 100000). Workers also send their auto-calibrated
-> `pose`, which updates the map's camera positions. Tests: `python tests/test_tracker.py`.
+**Setup now:** the fusion server runs on **Mac-1 (Szymon) at `10.247.46.145:8010`** with camA already streaming.
+Laptop 2 runs **only the camB worker** and sends to Mac-1. No server on this laptop.
+- Map (any browser on the Wi-Fi): `http://10.247.46.145:8010/`  ·  health: `http://10.247.46.145:8010/health`
+- camB sends to: **`ws://10.247.46.145:8010/ingest/camB`**
 
-Setup now: **laptop 2** runs the fusion server (`fusion.server`, port 8000) and the camB worker.
-**Mac-1** (10.247.46.145) runs the camA worker and sends to laptop 2. The map is at `http://<laptop2-ip>:8000/`.
-The server works. These steps get **camB** running. (This replaces HANDOFF_CAMB_WINDOWS.md, because the relay isn't used any more.)
+**Server changes Caspar should know about (Role 3):** `fusion/tracker.py` is now implemented (stable ids, Kalman,
+visible/predicted, optional skeletons) and `fusion/server.py` feeds every camera frame into it; `/tracks` people come
+from the tracker, other classes are grouped as before (ids ≥ 100000). Workers also send their auto-calibrated `pose`,
+which updates the map's camera positions. Tests: `python tests/test_tracker.py`.
 
 ## Rules for the AI
 - **Camera indices are per laptop.** camB has no `source` in config/cameras.json on purpose. **Always pass `--source <N>`**,
@@ -22,7 +20,7 @@ The server works. These steps get **camB** running. (This replaces HANDOFF_CAMB_
 ## 1. Update + install (once)
 ```powershell
 git pull
-.venv\Scripts\pip install opencv-contrib-python ultralytics websockets fastapi "uvicorn[standard]"
+.venv\Scripts\pip install opencv-contrib-python ultralytics websockets scipy
 ```
 (macOS: `.venv/bin/...` instead of `.venv\Scripts\...`, and `/` instead of `\`.) Don't install plain `opencv-python`
 next to contrib. If both are installed: `pip uninstall -y opencv-python opencv-contrib-python` then reinstall contrib.
@@ -44,12 +42,9 @@ Wait for **"GOOD - press S"** (magenta outlines on the markers), press **S**, an
 Then tell Szymon, so Mac-1 can `git pull` (both laptops must have the same cameras.json).
 If it stops with "camera gives 640x480 but K is for 1280x720", see Troubleshooting.
 
-## 4. Run (two terminals, leave both running)
+## 4. Run the camB worker (leave it running)
 ```powershell
-# terminal 1: server
-.venv\Scripts\python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8000
-# terminal 2: camB worker
-.venv\Scripts\python -m tools.camera_worker camB --source N --server ws://127.0.0.1:8000/ingest/camB --classes 0
+.venv\Scripts\python -m tools.camera_worker camB --source N --server ws://10.247.46.145:8010/ingest/camB --classes 0
 ```
 **Success:** the worker prints `connected to fusion server` and then **`camera OK at 1280x720, sending detections`**.
 **Auto-position (on by default):** the worker solves camB's position from the corner markers at startup and every 60 s
@@ -57,7 +52,7 @@ If it stops with "camera gives 640x480 but K is for 1280x720", see Troubleshooti
 Only a view of **all 4** markers updates it. Partial views only warn if the camera seems to have moved. Until the first
 4-marker view it uses the saved position. `--pose-interval 0` turns it off. Step 3 is still worth doing once
 (it saves a good starting position to git).
-Check: `http://127.0.0.1:8000/health` shows `"camB":{"online":true}`, and camB's feed appears on the map page.
+Check: `http://10.247.46.145:8010/health` shows `"camB":{"online":true}`, and camB's feed appears on the map page.
 (Add `--device 0` on an NVIDIA GPU, `--device mps` on a Mac. CPU is the default and should still manage several fps.)
 
 ## Troubleshooting
@@ -67,10 +62,9 @@ Check: `http://127.0.0.1:8000/health` shows `"camB":{"online":true}`, and camB's
 | `Could not open video source: N` / black tile | Wrong N, or the camera is busy: close Teams/Zoom/Camera app/OBS and any other worker or calibration window. Windows: Settings → Privacy & security → Camera → allow desktop apps. Unplug and replug, ideally into a different USB port (not a hub), then redo step 2 (indices can change). |
 | `WARNING: camera gives 640x480 but it was calibrated at 1280x720` | The worker now asks for 1280x720 (DirectShow + MJPG on Windows). If it still gets 640x480: it's the wrong camera (the built-in webcam), or a USB 2 hub/port is limiting it, so plug straight into the laptop. As a last resort, redo the chessboard at what it gives: `python -m calib.intrinsics camB --source N --width 640 --height 480`, then step 3 again. |
 | Worker exits with `camera detection failed` | Read the error under it. Usually the camera dropped. Restart the worker. |
-| `server connection failed; retrying` | The server (terminal 1) isn't running, or the URL is wrong. On this laptop use `ws://127.0.0.1:8000/ingest/camB`. |
+| `server connection failed; retrying` | Mac-1's server isn't reachable. Check both laptops are on the same Wi-Fi (`ipconfig`: 10.247.x.x), open `http://10.247.46.145:8010/health` in a browser here, and check the URL is `ws://10.247.46.145:8010/ingest/camB` (port **8010**). If Mac-1's IP changed, ask Szymon (`python tools/lan_ip.py` on Mac-1). |
 | Very slow (<3 fps) | `--device 0` if there's an NVIDIA GPU. Close the map tab on this laptop. Use `--classes 0` (people only). |
-| Mac-1's camA shows offline | Windows firewall: allow Python on **Private** networks (or `New-NetFirewallRule -DisplayName durhack8000 -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow` in admin PowerShell). The network profile must be Private, not Public. |
-| camB dots in the wrong place on the map | Step 3 wasn't done or wasn't pulled on both laptops, or the camera moved. Redo step 3, then restart both workers. |
+| camB dots in the wrong place on the map | Step 3 wasn't done or wasn't pulled on both laptops, or the camera moved. Redo step 3, then restart the camB worker (and ask Szymon to `git pull` + restart camA's worker). |
 
 ## Keep it running
 Plugged in, lid open, sleep off. **Don't touch camB once it's calibrated.** If it moves, redo step 3.

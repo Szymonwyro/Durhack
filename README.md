@@ -13,6 +13,8 @@ Docs: [CONTRACTS](docs/CONTRACTS.md) · [PLAN](docs/PLAN.md) · [DEMO_SCRIPT](do
   `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks`
   (bridge needs `pip install aiohttp websockets`). The Quest then uses `http://localhost:8001/quest/` as usual.
 - Camera workers send to `ws://10.247.46.145:8010/ingest/<camId>` (camA is already streaming from Mac-1).
+- **Caspar / camB (laptop 2):** follow docs/HANDOFF_LAPTOP2_SERVER_CAMB.md (redo camB's position, then):
+  `python -m tools.camera_worker camB --source N --server ws://10.247.46.145:8010/ingest/camB --classes 0`
 - Use `--margin 0.2` on fusion_to_quest so bystanders next to the square aren't shown; keep others out of the square.
 - **Quest alignment:** touch the 4 corner markers in the order the headset prompts: **1 → 7 → 3 → 5** (round the square). Wrong order = boxes move in the wrong direction.
 - The server now tracks people (fusion/tracker.py): stable ids, Kalman `vel`/`cov`, `visible`/`predicted`.
@@ -51,7 +53,8 @@ python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8000
 ```
 Find its LAN IP with `python tools/lan_ip.py`. Allow Python/Uvicorn through the OS firewall on the private network if prompted.
 
-On each camera computer, run one worker per attached camera, replacing `<SERVER_IP>` and the local camera index:
+On each camera computer, run one worker per attached camera, replacing `<SERVER_IP>` and the local camera index
+(**now: `<SERVER_IP>` = `10.247.46.145` and port `8010`, see "Live server" above**):
 ```powershell
 python -m tools.camera_worker camA --source 1 --server ws://<SERVER_IP>:8000/ingest/camA
 python -m tools.camera_worker camB --source 0 --server ws://<SERVER_IP>:8000/ingest/camB

@@ -71,7 +71,8 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   by name/resolution via config/cameras.json. Option for camera C: iPhone via Continuity Camera on Mac-2.
 
 ## Handoffs
-- **Laptop 2 = fusion server + camB:** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md. Mac-1 runs the camA worker into it.
+- **Laptop 2 = camB worker only (Caspar):** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md, sending to Mac-1's server
+  `ws://10.247.46.145:8010/ingest/camB`.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
 - **Current server: Mac-1, `http://10.247.46.145:8010/`** (port 8010; laptop 2 is down). camA streams into it.
   The server tracks people (fusion/tracker.py: stable ids, Kalman, visible/predicted; tests in tests/).
@@ -80,7 +81,7 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   Quest: `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks` next to the bridge (README "Live server").
 - **Live cameras → Quest (Role 1):** until fusion/server.py speaks quest/INTERFACE.md, run Role 1's bridge and feed it
   the fusion server's fused positions: `python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py
-  ws://<laptop2-ip>:8000/tracks` (laptop 2's IP is in README.md). Bridge = stable ids, Kalman, world/align_points on :8001.
+  ws://10.247.46.145:8010/tracks` (the server on Mac-1, see README "Live server"). Bridge = stable ids, Kalman, world/align_points on :8001.
 - **Test data without cameras (Role 1/2):** samples/test_walk_camA.jsonl = 60 s of one person (Szymon) walking in
   and out of the 1.5 m square, seen by camA, as contract detection messages in world metres. Replay it into any
   server's WS /ingest at real pace, looping: `python3 tools/test_walk.py replay [--url ws://127.0.0.1:8001/ingest]`
