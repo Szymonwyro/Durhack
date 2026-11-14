@@ -78,6 +78,7 @@ def detect_video(
 
         while True:
             ok, frame = capture.read()
+            captured_at = time.time()  # when the frame was grabbed (before detection), so lag includes inference
             if not ok:
                 break
 
@@ -89,7 +90,6 @@ def detect_video(
                 verbose=False,
             )[0]
             frame_height, frame_width = frame.shape[:2]
-            captured_at = time.time()
             time_seconds = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
             if time_seconds <= 0 and fps > 0:
                 time_seconds = frame_index / fps

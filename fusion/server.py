@@ -26,6 +26,43 @@ camera_config: dict[str, dict[str, Any]] = {}
 camera_state: dict[str, dict[str, Any]] = {}
 state_lock = asyncio.Lock()
 tracker = Tracker()  # people: stable ids, Kalman, visible/predicted, skeletons (fusion/tracker.py)
+camera_timing: dict[str, Any] = {}  # camera -> CameraClock
+
+
+class CameraClock:
+    """Maps a worker's capture timestamps onto this server's clock and measures its delay.
+
+    Workers send "t" = capture time on THEIR clock. If that clock agrees with ours (|median gap| < 1 s, i.e. both
+    NTP-synced), capture time = t. Otherwise we only know the gap up to the latency, so we assume the fastest
+    recent frame had ~0 delay: capture time = t + min(recent gaps). Lag = arrival - capture time.
+    """
+
+    def __init__(self) -> None:
+        from collections import deque
+
+        self.gaps = deque(maxlen=150)   # arrival - t (s)
+        self.arrivals = deque(maxlen=60)
+        self.lags = deque(maxlen=60)
+
+    def capture_time(self, t_worker: float, arrival: float, synced: bool | None = None) -> float:
+        self.gaps.append(arrival - t_worker)
+        self.arrivals.append(arrival)
+        gaps = sorted(self.gaps)
+        median = gaps[len(gaps) // 2]
+        self.synced = abs(median) < 1.0 if synced is None else synced
+        captured = t_worker if self.synced else t_worker + gaps[0]
+        captured = min(captured, arrival)
+        self.lags.append(arrival - captured)
+        return captured
+
+    def stats(self) -> dict[str, Any]:
+        lags = sorted(self.lags)
+        span = self.arrivals[-1] - self.arrivals[0] if len(self.arrivals) > 1 else 0
+        return {"fps": round((len(self.arrivals) - 1) / span, 1) if span > 0 else None,
+                "lag_ms": round(lags[len(lags) // 2] * 1000) if lags else None,
+                "clock": "synced" if getattr(self, "synced", True) else "offset (lag is relative to its fastest frame)"}
+
+    # note: workers that send "t_server" (tools/camera_worker.py) are always "synced"
 
 
 def load_world_config() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -124,6 +161,7 @@ async def health() -> dict[str, Any]:
                     "age_seconds": round(now - camera_state[camera_id]["received_at"], 2)
                     if camera_id in camera_state
                     else None,
+                    **(camera_timing[camera_id].stats() if camera_id in camera_timing else {}),
                 }
                 for camera_id in camera_config
             },
@@ -210,7 +248,13 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
             if isinstance(pose, dict) and all(k in pose for k in ("R", "t", "pos", "yaw")):
                 camera_config[camera_id].update({k: pose[k] for k in ("R", "t", "pos", "yaw")})
             async with state_lock:
-                tracker.camera_frame(camera_id, detections, time.time())
+                arrival = time.time()
+                clock = camera_timing.setdefault(camera_id, CameraClock())
+                if finite_number(message.get("t_server")):  # worker already converted to our clock
+                    captured = clock.capture_time(float(message["t_server"]), arrival, synced=True)
+                else:
+                    captured = clock.capture_time(float(message["t"]), arrival)
+                tracker.camera_frame(camera_id, detections, arrival, t_capture=captured)
                 camera_state[camera_id] = {
                     "received_at": time.monotonic(),
                     "timestamp": float(message["t"]),
@@ -218,7 +262,8 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
                     "detections": detections,
                     "jpeg": jpeg,
                 }
-            await websocket.send_json({"ok": True, "frame": frame_number})
+            # server_t lets the worker map its clock onto ours (NTP-style, from the round trip)
+            await websocket.send_json({"ok": True, "frame": frame_number, "server_t": time.time()})
     except WebSocketDisconnect:
         return
 

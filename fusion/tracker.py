@@ -37,6 +37,9 @@ SHORT_DROP_S = 1.0        # ... are dropped after 1 s unseen instead of being pr
 MERGE_M = 0.6             # a predicted track this close to a visible one is the same person -> dropped
 SAME_FRAME_M = 0.4        # detections from one camera frame closer than this are one person (duplicate boxes)
 
+LAG_SIGMA_PER_S = 0.5     # m of extra measurement noise per second of lag (late detections count a bit less)
+MAX_LAG_S = 1.0           # detections older than this (vs the track) are shifted at most this far
+
 SKEL_SOURCE_WINDOW_S = 0.3
 SKEL_ALPHA = 0.5
 SKEL_JOINT_HOLD_S = 0.5
@@ -62,7 +65,8 @@ class Track:
         self.x = np.array([pos[0], pos[1], 0.0, 0.0])
         self.P = np.diag([NEW_TRACK_SIGMA ** 2] * 2 + [1.0] * 2)
         self.t = t                  # time of the state estimate
-        self.last_seen = t
+        self.last_seen = t          # capture time of the latest detection
+        self.last_recv = t          # arrival time of the latest detection (drives visible/predicted)
         self.pos_at_last_seen = self.x[:2].copy()
         self.seen = {cam: t}        # camera -> last time it saw this track
         # skeleton
@@ -85,15 +89,31 @@ class Track:
         self.P = F @ self.P @ F.T + G @ G.T * q
         self.t = t
 
-    def update(self, z, t, cam):
+    def pos_at(self, t):
+        """Position at time t (may be slightly in the past: a late camera's capture time)."""
+        return self.x[:2] + self.x[2:] * float(np.clip(t - self.t, -MAX_LAG_S, MAX_EXTRAPOLATE_S))
+
+    def update(self, z, t, cam, recv=None):
+        """z measured at capture time t. A detection older than the filter state (a slow camera, after a fast one
+        already updated the track) is moved forward along the track's velocity to the filter time, and trusted
+        a little less, instead of dragging the track back to where the person was."""
+        lag = self.t - t
+        z = np.asarray(z, float)
+        if lag > 0:
+            lag = min(lag, MAX_LAG_S)
+            z = z + self.x[2:] * lag
+            t = self.t
+        else:
+            lag = 0.0
         self.predict(t)
         H = np.zeros((2, 4))
         H[0, 0] = H[1, 1] = 1
-        S = H @ self.P @ H.T + np.eye(2) * MEAS_SIGMA ** 2
+        S = H @ self.P @ H.T + np.eye(2) * (MEAS_SIGMA ** 2 + (LAG_SIGMA_PER_S * lag) ** 2)
         K = self.P @ H.T @ np.linalg.inv(S)
         self.x = self.x + K @ (np.asarray(z) - H @ self.x)
         self.P = (np.eye(4) - K @ H) @ self.P
-        self.last_seen = t
+        self.last_seen = max(self.last_seen, t)
+        self.last_recv = max(self.last_recv, recv if recv is not None else t)
         self.pos_at_last_seen = self.x[:2].copy()
         self.seen[cam] = t
         self.hits += 1
@@ -161,8 +181,10 @@ class Tracker:
     def __init__(self):
         self.tracks_ = []
 
-    def camera_frame(self, cam, detections, now):
-        """detections: world detections from one camera frame (dicts with position, class_name, bbox, kp3d?)."""
+    def camera_frame(self, cam, detections, now, t_capture=None):
+        """detections: world detections from one camera frame (dicts with position, class_name, bbox, kp3d?).
+        now = arrival time; t_capture = when the frame was taken (server clock), if known."""
+        t = now if t_capture is None else min(t_capture, now)
         people = []  # one camera can't see one person twice: merge duplicate boxes (keep the most confident)
         for d in sorted((d for d in detections if d.get("class_name", "person") == "person"),
                         key=lambda d: -float(d.get("confidence", d.get("conf", 0.0)))):
@@ -171,7 +193,8 @@ class Tracker:
         if self.tracks_ and people:
             cost = np.full((len(self.tracks_), len(people)), 1e6)
             for i, tr in enumerate(self.tracks_):
-                pos, _, cov = tr.state_at(now)  # extrapolated; the filter itself only steps on updates
+                _, _, cov = tr.state_at(now)  # extrapolated; the filter itself only steps on updates
+                pos = tr.pos_at(t)            # where the track was when this frame was captured
                 gate = GATE_M + 2 * math.sqrt(max(cov[0, 0], cov[1, 1]))
                 for j, d in enumerate(people):
                     dist = math.dist(pos, d["position"])
@@ -184,12 +207,13 @@ class Tracker:
         used = set()
         for r, c in matched:
             tr, d = self.tracks_[r], people[c]
-            tr.update(d["position"], now, cam)
+            tr.update(d["position"], t, cam, recv=now)
             tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now)
             used.add(c)
         for c, d in enumerate(people):
             if c not in used:
-                tr = Track(d["position"], now, cam)
+                tr = Track(d["position"], t, cam)
+                tr.last_recv = now
                 tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now)
                 self.tracks_.append(tr)
 
@@ -200,7 +224,7 @@ class Tracker:
         visible_pos = []
         for tr in self.tracks_:
             pos, vel, cov = tr.state_at(now)
-            unseen = now - tr.last_seen
+            unseen = now - tr.last_recv  # by arrival: a camera with 0.3 s lag still counts as "seeing" them
             if tr.id is None:  # tentative: never shown; deleted if it doesn't get confirmed quickly
                 if unseen <= TENTATIVE_DROP_S:
                     keep.append(tr)

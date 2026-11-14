@@ -148,6 +148,21 @@ def make_message(
     return message
 
 
+class ServerClock:
+    """Offset between this laptop's clock and the server's, from each frame's round trip (NTP-style):
+    offset = server_t - midpoint(send, reply). Uses the fastest of the recent round trips (least queueing)."""
+
+    def __init__(self) -> None:
+        self.samples: list[tuple[float, float]] = []  # (round trip, offset)
+        self.offset: float | None = None
+
+    def sample(self, sent: float, received: float, server_t: Any) -> None:
+        if not isinstance(server_t, (int, float)):
+            return  # older server without server_t: it falls back to its own estimate
+        self.samples = (self.samples + [(received - sent, float(server_t) - (sent + received) / 2)])[-50:]
+        self.offset = min(self.samples)[1]
+
+
 async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -> None:
     import websockets
 
@@ -167,6 +182,7 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
     elif calibration["R"] is None:
         raise ValueError(f"Camera {camera_id!r} has no saved position (R, t); run with --pose-interval > 0")
     outbound: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+    clock = ServerClock()
     stop = threading.Event()
     finished = threading.Event()
     failure: list[BaseException] = []
@@ -237,8 +253,12 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
                             message = await asyncio.to_thread(outbound.get, True, 1)
                         except queue.Empty:
                             continue
+                        if clock.offset is not None:  # capture time on the SERVER's clock (laptop clocks differ)
+                            message["t_server"] = message["t"] + clock.offset
+                        sent = time.time()
                         await websocket.send(json.dumps(message, separators=(",", ":")))
                         response = json.loads(await websocket.recv())
+                        clock.sample(sent, time.time(), response.get("server_t"))
                         if response.get("ok") is not True:
                             raise RuntimeError(
                                 f"fusion server rejected frame {message['frame']}: "

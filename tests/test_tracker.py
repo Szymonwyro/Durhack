@@ -98,3 +98,37 @@ def test_no_ghosts():
 if __name__ == "__main__":
     test_no_ghosts()
     print("ghost test passed")
+
+
+def simulate_two_cameras(compensate):
+    """Person walks +x at 1 m/s. camA: 30 fps, 0.03 s lag. camB: 6 fps, 0.3 s lag. Returns mean/max track error."""
+    tr = Tracker()
+    events = []
+    for k in range(int(4 * 30)):
+        tc = 5000.0 + k / 30
+        events.append((tc + 0.03, "camA", tc))
+    for k in range(int(4 * 6)):
+        tc = 5000.0 + k / 6
+        events.append((tc + 0.30, "camB", tc))
+    errs = []
+    for arrival, cam, tc in sorted(events):
+        true_x = (tc - 5000.0) * 1.0
+        tr.camera_frame(cam, [det(true_x, 0.75)], arrival, t_capture=tc if compensate else None)
+        out = tr.tracks(arrival)
+        if out and arrival > 5001.0:
+            errs.append(abs(out[0]["pos"][0] - (arrival - 5000.0)))
+    return sum(errs) / len(errs), max(errs)
+
+
+def test_lag_compensation():
+    mean_c, max_c = simulate_two_cameras(True)
+    mean_n, max_n = simulate_two_cameras(False)
+    assert mean_c < 0.05 and max_c < 0.12, (mean_c, max_c)
+    assert mean_n > mean_c
+
+
+if __name__ == "__main__":
+    test_lag_compensation()
+    for c in (False, True):
+        m, x = simulate_two_cameras(c)
+        print(f"{'with' if c else 'without'} lag compensation: track error mean {m * 100:.1f} cm, max {x * 100:.1f} cm")
