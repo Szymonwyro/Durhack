@@ -1,4 +1,8 @@
-# Handoff: camB on laptop 2 (Caspar) → server on Mac-1 (for Caspar / his AI)
+# Handoff: Caspar's PC = fusion server (for Caspar / his AI)
+
+> **Now: Caspar's PC runs the server only** (`python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8010`, on
+> current `main`). **camB runs on Jack's computer** (see docs/HANDOFF_CAMC_JACK.md). The camera-worker steps below
+> apply to whichever laptop has camB plugged in.
 
 **Setup now:** the fusion server runs on **this Windows PC at `10.247.206.87:8010`**.
 Laptop 2 runs **only the camB worker** and sends to this PC. No server on the worker computer.

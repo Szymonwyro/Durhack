@@ -1,4 +1,8 @@
-# Handoff: camC on Jack's computer (for Jack / his AI)
+# Handoff: Jack's computer runs a camera worker (for Jack / his AI)
+
+> **Now: Jack's computer runs camB** (already calibrated and feeding Caspar's server at `10.247.206.87:8010`).
+> Caspar's PC runs the server only. To add skeletons, go straight to **"Skeletons on this camera"** below with
+> `<camId>` = `camB` and `<server>` = `10.247.206.87`. The steps for a brand-new camera (camC) stay below for reference.
 
 **Goal:** a camera plugged into Jack's Mac becomes **camC** and sends detections to the fusion server on Caspar's laptop
 (`ws://10.247.206.87:8010`, see README "Live server"). camA (Szymon's Mac) and camB (Caspar) are already running.

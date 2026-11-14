@@ -76,7 +76,8 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 - **Laptop 2 = camB worker only (Caspar):** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md, sending to Mac-1's server
   `ws://10.247.206.87:8010/ingest/camB`.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
-- **Current server: this Windows PC, `http://10.247.206.87:8010/`** (port 8010).
+- **Current server: Caspar's Windows PC, `http://10.247.206.87:8010/`** (port 8010; server only). camA = Szymon's Mac,
+  camB = Jack's computer (docs/HANDOFF_CAMC_JACK.md).
   The server tracks people (fusion/tracker.py: stable ids, Kalman, visible/predicted; tests in tests/).
   Quest alignment: touch corners 1 → 7 → 3 → 5. Skeleton pipeline (`--pose`, `kp3d`, track `skeleton`) is built
   through the server but not in use yet; fusion_to_quest/bridge pass-through not done.
