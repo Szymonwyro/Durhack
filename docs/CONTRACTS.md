@@ -26,7 +26,16 @@ The server URL comes from `config/server.json` or the `SERVER_URL` env var. Neve
 {"cam": "camA", "t": 1731500000.123, "foot": [x, y], "bbox": [x, y, w, h], "conf": 0.9}
 ```
 - `foot` is in world metres. `bbox` is in image pixels.
-- Optional stretch fields: `"mask_png": "<b64>"` and `"kp3d": [[x, y, z], ...]` (world frame).
+- Optional stretch field: `"mask_png": "<b64>"`.
+- Optional **`kp3d`** (pose skeleton, worker run with `--pose`): exactly 17 entries in COCO-17 order (below), each
+  `[x, y, z, conf]` in world metres (z up, floor = 0) or `null` for a joint not seen (conf < 0.3). Omitted or `null`
+  when there is no usable skeleton (small person, < 8 joints). Joints are lifted onto a vertical plane through the
+  foot point, facing the camera, so depth along the camera ray is approximate (~±0.2 m); height and sideways are good.
+
+```json
+{"cam": "camA", "t": 1731500000.123, "foot": [x, y], "bbox": [x, y, w, h], "conf": 0.9,
+ "kp3d": [[0.71, 0.52, 1.66, 0.93], null, ... 17 entries]}
+```
 
 ### zone (PIR → server, /ingest)
 ```json
@@ -42,6 +51,23 @@ The server uses an active zone as a loose position measurement: its centroid, wi
 ```
 - `visible`: some camera saw the track recently. `predicted`: no camera has seen it for more than 0.5 s, so the position is a Kalman prediction. Tracks are dropped after 10 s unseen.
 - **The server does not send "hidden".** Each viewer decides hidden vs visible itself, by testing line of sight from its own position to the track against the walls.
+- Optional **`skeleton`** per track (omitted when the track has none):
+  `{"kp": [[x, y, z, conf] | null, ... 17], "src": "camB", "age": 0.12, "frozen": false}`
+  - `kp`: 17 joints, COCO-17 order, world metres (z up), `null` = joint unknown. Smoothed by the server.
+  - `src`: camera the joints came from (the one with the best view: highest mean joint conf, tie → larger bbox).
+  - `age`: seconds since that camera last saw the joints.
+  - `frozen`: `true` while the track is `predicted`. The last skeleton is translated with the Kalman displacement
+    since `last_seen` (pose not updated). Dropped after 3 s frozen.
+
+### Pose skeleton (COCO-17)
+COCO-17 joint order (index: name): 0 nose, 1 left_eye, 2 right_eye, 3 left_ear, 4 right_ear, 5 left_shoulder,
+6 right_shoulder, 7 left_elbow, 8 right_elbow, 9 left_wrist, 10 right_wrist, 11 left_hip, 12 right_hip, 13 left_knee,
+14 right_knee, 15 left_ankle, 16 right_ankle. ("left" = the person's left.)
+
+Bones to draw (pairs of joint indices):
+`[[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],[0,5],[0,6]]`
+Skip a bone if either end is `null`.
+All skeleton fields are optional and backward compatible: clients that don't know them ignore them.
 
 ### world (server → clients on connect, and GET /world)
 ```json

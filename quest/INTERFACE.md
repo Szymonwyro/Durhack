@@ -132,12 +132,39 @@ Field rules:
 - `pos`: the person's foot point on the floor, metres. `vel`: m/s. `cov`: 2x2 position covariance in m², symmetric, positive definite, growing while predicted.
 - Drop a track from the list once it has been predicted for more than ~8 s or its 2-sigma radius exceeds ~3 m. No separate "lost" message.
 - `zones` NEW: current PIR state, so clients don't need another socket.
-- No NaN/Infinity, no nulls inside arrays.
+- No NaN/Infinity, no nulls inside arrays. **Exception:** `skeleton.kp` uses `null` for an unknown joint (§3a).
+- `skeleton` NEW, optional: see §3a.
 
 Quality targets the overlay depends on:
 
 - Foot-point error under ~15 cm in the overlap areas (box should wrap the real person).
 - Capture-to-send latency under ~150 ms. The Quest extrapolates with vel, so a correct vel matters more than a perfectly smooth pos.
+
+## 3a. Pose skeleton on tracks — NEW, optional (Role 2 server, Role 3 worker; Role 1 renders)
+
+Each track may carry a skeleton; omitted when there is none. Clients that don't know the field ignore it.
+
+```json
+{"id":7, "state":"visible", "pos":[2.10,3.40], ...,
+ "skeleton": {"kp": [[2.08,3.41,1.66,0.93], null, ...17 entries], "src":"camB", "age":0.12, "frozen":false}}
+```
+
+- `kp`: exactly 17 joints in COCO-17 order, each `[x, y, z, conf]` in world metres (z up, floor = 0), or `null` if
+  unknown. Joints come from one camera, lifted onto a vertical plane through the foot point that faces that camera:
+  height and sideways position are good, depth along that camera's view is approximate (~±0.2 m).
+- `src`: camera the joints came from. `age`: seconds since that camera last saw them.
+- `frozen`: `true` while the track is `predicted`. The last skeleton is moved with the track (Kalman displacement since
+  `last_seen`) but the pose is not updated. Dropped after 3 s frozen. Suggest drawing frozen skeletons dimmer/dashed.
+- Path: worker `detection.kp3d` → fusion server (best view, EMA-smoothed, null joints held 0.5 s) → `/tracks` →
+  `tools/fusion_to_quest.py` → `quest/tools/bridge.py` (passes it through untouched) → Quest.
+
+COCO-17 joint order (index: name): 0 nose, 1 left_eye, 2 right_eye, 3 left_ear, 4 right_ear, 5 left_shoulder,
+6 right_shoulder, 7 left_elbow, 8 right_elbow, 9 left_wrist, 10 right_wrist, 11 left_hip, 12 right_hip, 13 left_knee,
+14 right_knee, 15 left_ankle, 16 right_ankle. ("left" = the person's left.)
+
+Bones to draw (pairs of joint indices):
+`[[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],[0,5],[0,6]]`
+Skip a bone if either end is `null`.
 
 ## 4. WS /events — pings NEW (Role 2) — needed by 23:00
 
