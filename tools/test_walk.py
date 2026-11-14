@@ -9,6 +9,8 @@
     python3 tools/test_walk.py replay                                  # ws://127.0.0.1:8001/ingest, loops
     python3 tools/test_walk.py replay --url ws://127.0.0.1:8001/ingest --speed 2 --once
     python3 tools/test_walk.py replay --print                          # just print the messages, no server
+    # into the fusion server's /ingest/<cam> instead (worker format: one message per frame + a tiny JPEG):
+    python3 tools/test_walk.py replay samples/test_walk_camA_pose.jsonl --fusion --url ws://127.0.0.1:8010/ingest/camA
 
 Each line is a contract 'detection' message (CLAUDE.md / docs/CONTRACTS.md):
     {"cam":"camA","t":<unix>,"foot":[x,y],"bbox":[x,y,w,h],"conf":0.9}
@@ -89,6 +91,31 @@ def load(path):
     return [r for r in rows if r.get("type") != "meta"]
 
 
+_BLANK_JPEG = None
+
+
+def fusion_message(group, frame):
+    """One recorded frame -> the camera worker's /ingest/<cam> payload (fusion/server.py)."""
+    import base64
+
+    global _BLANK_JPEG
+    if _BLANK_JPEG is None:
+        import cv2
+        import numpy as np
+
+        _BLANK_JPEG = base64.b64encode(cv2.imencode(".jpg", np.zeros((90, 160, 3), np.uint8))[1]).decode("ascii")
+    detections = []
+    for r in group:
+        if "foot" not in r:
+            continue
+        d = {"camera_id": r["cam"], "class_id": 0, "class_name": "person", "confidence": r["conf"],
+             "bbox": r["bbox"], "image_point": [0.0, 0.0], "position": r["foot"]}
+        if r.get("kp3d") is not None:
+            d["kp3d"] = r["kp3d"]
+        detections.append(d)
+    return {"cam": group[0]["cam"], "t": time.time(), "frame": frame, "detections": detections, "jpeg": _BLANK_JPEG}
+
+
 async def replay(a):
     rows = load(a.file)
     if not rows:
@@ -100,9 +127,33 @@ async def replay(a):
         import websockets
         ws = await websockets.connect(a.url)
         print("connected to", a.url, flush=True)
+    if a.fusion:
+        frames = {}
+        for r in rows:
+            frames.setdefault(r["frame"], []).append(r)
+        frame_rows = [v for _, v in sorted(frames.items())]
     loop = 0
     while True:
         start = time.time()
+        if a.fusion:
+            for n, group in enumerate(frame_rows):
+                wait = start + group[0]["dt"] / a.speed - time.time()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                msg = fusion_message(group, loop * 100000 + n)
+                if ws is None:
+                    print(json.dumps({k: v for k, v in msg.items() if k != "jpeg"}), flush=True)
+                else:
+                    await ws.send(json.dumps(msg))
+                    reply = json.loads(await ws.recv())
+                    if not reply.get("ok"):
+                        sys.exit(f"server rejected frame: {reply}")
+            loop += 1
+            print(f"loop {loop} done", flush=True)
+            if a.once:
+                break
+            await asyncio.sleep(1.0)
+            continue
         for r in rows:
             wait = start + r["dt"] / a.speed - time.time()
             if wait > 0:
@@ -142,6 +193,8 @@ def main():
     r.add_argument("--speed", type=float, default=1.0)
     r.add_argument("--once", action="store_true", help="play once instead of looping")
     r.add_argument("--print", action="store_true", help="print messages instead of sending")
+    r.add_argument("--fusion", action="store_true",
+                   help="send to the fusion server's /ingest/<cam> (worker format) instead of contract messages")
     a = p.parse_args()
     make(a) if a.cmd == "make" else asyncio.run(replay(a))
 

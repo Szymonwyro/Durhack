@@ -12,6 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from calib.config_io import CAMERAS, MARKERS, ROOT
+from fusion.tracker import Tracker
 from perception.floor_project import match_floor_detections
 
 WALLS = ROOT / "config" / "walls.json"
@@ -24,6 +25,7 @@ app = FastAPI(title="DurHack camera fusion")
 camera_config: dict[str, dict[str, Any]] = {}
 camera_state: dict[str, dict[str, Any]] = {}
 state_lock = asyncio.Lock()
+tracker = Tracker()  # people: stable ids, Kalman, visible/predicted, skeletons (fusion/tracker.py)
 
 
 def load_world_config() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -77,9 +79,11 @@ def map_tracks(snapshot: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     if not observations:
         return []
 
+    # people come from the tracker (see tracks()); this only groups other classes (chairs, bags...) for the map
+    observations = {cam: [d for d in dets if d.get("class_name") != "person"] for cam, dets in observations.items()}
     matched = match_floor_detections(observations, max_distance_m=MATCH_DISTANCE_METRES)
     tracks = []
-    for track_id, detection in enumerate(matched, start=1):
+    for track_id, detection in enumerate(matched, start=100000):
         tracks.append(
             {
                 "id": track_id,
@@ -206,6 +210,7 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
             if isinstance(pose, dict) and all(k in pose for k in ("R", "t", "pos", "yaw")):
                 camera_config[camera_id].update({k: pose[k] for k in ("R", "t", "pos", "yaw")})
             async with state_lock:
+                tracker.camera_frame(camera_id, detections, time.time())
                 camera_state[camera_id] = {
                     "received_at": time.monotonic(),
                     "timestamp": float(message["t"]),
@@ -225,7 +230,9 @@ async def tracks(websocket: WebSocket) -> None:
         while True:
             async with state_lock:
                 snapshot = dict(camera_state)
-            await websocket.send_json({"t": time.time(), "tracks": map_tracks(snapshot)})
+                now = time.time()
+                people = tracker.tracks(now)
+            await websocket.send_json({"t": now, "tracks": people + map_tracks(snapshot)})
             await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         return
