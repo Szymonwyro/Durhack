@@ -323,8 +323,20 @@ def main() -> None:
         parser.error("--confidence must be between 0 and 1")
 
     _, source = load_camera(args.camera_id, args.source)
+    live = isinstance(source, int) or str(source).startswith(("http://", "https://", "rtsp://"))
     try:
-        asyncio.run(publish(args.camera_id, source, args))
+        while True:
+            try:
+                asyncio.run(publish(args.camera_id, source, args))
+                reason = "camera stream ended (dropped frame / USB hiccup / unplugged)"
+            except RuntimeError as error:  # e.g. camera can't be opened right now
+                reason = str(error)
+            if not live:
+                break  # a video file: done
+            # a live camera: reopen instead of exiting. If it was unplugged and another camera took its index,
+            # the auto-pose jump guard keeps the old position until two matching 4-marker solves agree.
+            print(f"[{args.camera_id}] {reason}; reopening camera {source!r} in 2 s", flush=True)
+            time.sleep(2)
     except KeyboardInterrupt:
         print(f"\n[{args.camera_id}] stopped", flush=True)
 
