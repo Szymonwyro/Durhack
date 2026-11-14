@@ -8,6 +8,10 @@ round-trip time on the receiving device.
           (falls back to synthetic frames if the camera can't be opened)
   camera: python tools/stream_test.py serve --source 0 --raw --quality 90
           -> use http://<ip>:8090/stream.mjpg as the camera "source" on Mac-1 (live_map, calib)
+  push to Mac-1 (only OUTBOUND from the camera laptop, so no Windows firewall changes):
+          Mac-1:   python tools/stream_test.py relay                 (port 8095)
+          laptop:  python tools/stream_test.py push http://<mac1-ip>:8095 --cam camB --source 0
+          -> camera source on Mac-1: http://127.0.0.1:8095/camB/stream.mjpg
   recv:   python tools/stream_test.py recv http://<ip>:8090 [--seconds 10]   (e.g. from Mac-2 / UNO Q)
   phone:  open http://<ip>:8090/ in iPhone Safari or the Quest browser; the page shows live stats.
 
@@ -214,6 +218,125 @@ def recv(args):
     return 0 if good else 1
 
 
+
+class Latest:
+    """Latest JPEG per camera name, with a condition so readers wait for new frames."""
+
+    def __init__(self):
+        self.frames, self.seqs, self.times, self.lock = {}, {}, {}, threading.Condition()
+
+    def put(self, cam, jpg):
+        with self.lock:
+            self.frames[cam], self.seqs[cam], self.times[cam] = jpg, self.seqs.get(cam, 0) + 1, time.time()
+            self.lock.notify_all()
+
+    def next(self, cam, last_seq, timeout=2.0):
+        with self.lock:
+            self.lock.wait_for(lambda: self.seqs.get(cam, 0) not in (0, last_seq), timeout)
+            return self.frames.get(cam), self.seqs.get(cam, 0)
+
+
+def relay(args):
+    """Receive frames POSTed by `push` (e.g. from the Windows laptop) and re-serve them as MJPEG.
+    Mac-1 then uses http://127.0.0.1:<port>/<cam>/stream.mjpg as the camera source."""
+    store = Latest()
+
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"  # keep-alive, so the pusher reuses one connection
+
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            parts = self.path.strip("/").split("/")
+            if len(parts) != 2 or parts[0] != "push":
+                self.send_error(404)
+                return
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            if body:
+                store.put(parts[1], body)
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_GET(self):
+            path = self.path.split("?")[0].strip("/")
+            try:
+                if path == "":
+                    now = time.time()
+                    status = {c: {"frames": store.seqs[c], "age_s": round(now - store.times[c], 2)} for c in store.seqs}
+                    body = json.dumps(status).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif path.endswith("/stream.mjpg"):
+                    cam = path.split("/")[0]
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=f")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    seq = 0
+                    while True:
+                        jpg, seq2 = store.next(cam, seq)
+                        if jpg is None or seq2 == seq:
+                            continue
+                        seq = seq2
+                        self.wfile.write(b"--f\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg)
+                                         + jpg + b"\r\n")
+                else:
+                    self.send_error(404)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except OSError:
+        ip = "127.0.0.1"
+    s.close()
+    print(f"relay listening on port {args.port}", flush=True)
+    print(f"on the camera laptop:  python tools/stream_test.py push http://{ip}:{args.port} --cam camB --source <N>",
+          flush=True)
+    print(f"camera source on this Mac:  http://127.0.0.1:{args.port}/<cam>/stream.mjpg   status: http://127.0.0.1:{args.port}/",
+          flush=True)
+    ThreadingHTTPServer(("0.0.0.0", args.port), H).serve_forever()
+
+
+def push(args):
+    """Capture a camera here and POST each JPEG to a relay on Mac-1 (outbound only: no firewall changes)."""
+    import http.client
+    from urllib.parse import urlparse
+
+    src = Source(args.source, args.width, args.quality, raw=True, height=args.height)
+    u = urlparse(args.url)
+    path = f"/push/{args.cam}"
+    print(f"pushing camera {args.source} as {args.cam} to {u.hostname}:{u.port or 80} (Ctrl+C to stop)", flush=True)
+    conn, seq, sent, t0, errors = None, 0, 0, time.time(), 0
+    while True:
+        jpg, seq = src.next(seq)
+        try:
+            if conn is None:
+                conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=5)
+            conn.request("POST", path, body=jpg, headers={"Content-Type": "image/jpeg"})
+            conn.getresponse().read()
+            sent += 1
+            errors = 0
+        except OSError as e:
+            errors += 1
+            if conn is not None:
+                conn.close()
+            conn = None
+            if errors == 1 or errors % 20 == 0:
+                print(f"push failed ({e}); retrying... (relay running on the Mac? same Wi-Fi?)", flush=True)
+            time.sleep(0.5)
+        if time.time() - t0 >= 5:
+            print(f"{sent / (time.time() - t0):.1f} fps sent, ~{len(jpg) / 1024:.0f} KB/frame", flush=True)
+            sent, t0 = 0, time.time()
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -225,11 +348,20 @@ def main():
     s.add_argument("--port", type=int, default=8090)
     s.add_argument("--raw", action="store_true",
                    help="no timestamp overlay: use when the stream is a real camera source (detection/calibration)")
+    rl = sub.add_parser("relay", help="on Mac-1: receive pushed frames, re-serve as MJPEG")
+    rl.add_argument("--port", type=int, default=8095)
+    pu = sub.add_parser("push", help="on the camera laptop: send camera frames to a relay")
+    pu.add_argument("url", help="relay address, e.g. http://10.247.46.145:8095")
+    pu.add_argument("--cam", default="camB")
+    pu.add_argument("--source", type=int, default=0)
+    pu.add_argument("--width", type=int, default=1280)
+    pu.add_argument("--height", type=int, default=720)
+    pu.add_argument("--quality", type=int, default=90)
     r = sub.add_parser("recv")
     r.add_argument("url")
     r.add_argument("--seconds", type=float, default=10)
     a = p.parse_args()
-    sys.exit(serve(a) if a.cmd == "serve" else recv(a))
+    sys.exit({"serve": serve, "recv": recv, "relay": relay, "push": push}[a.cmd](a))
 
 
 if __name__ == "__main__":

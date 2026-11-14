@@ -27,7 +27,7 @@
     },
     {
       "id": "camB",
-      "source": "http://WINDOWS_IP:8090/stream.mjpg",
+      "source": "http://127.0.0.1:8095/camB/stream.mjpg",
       "intrinsics_note": "copied from camA (same camera model); re-run calib.intrinsics camB if it's a different model",
       "width": 1280,
       "height": 720,
