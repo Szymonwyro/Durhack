@@ -89,6 +89,14 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   server's WS /ingest at real pace, looping: `python3 tools/test_walk.py replay [--url ws://127.0.0.1:8001/ingest]`
   (e.g. into `quest/tools/bridge.py`, which turns it into /tracks). `--print` just prints it.
 
+## Camera states
+**Camera states (new, after `git pull` + restart of the server AND every camera worker):** each camera is
+TRUSTED (green on the map, weight 1) / DEGRADED (amber, weight 0.4: unverified or poor re-solve) / EXCLUDED
+(orange, no detections: markers say it moved) / OFFLINE (grey: unplugged, socket closed, or silent for 2.5 s; the
+server decides this itself). An OFFLINE/EXCLUDED camera's detections are dropped at once and people only it saw go
+"predicted". Workers check the corner markers on (re)connect and every 60 s (config/refresh.json; rules in
+calib/refresh.py). `GET /cameras` shows each camera's state, weight, fps, lag and reasons.
+
 ## Device roles
 | Device | Runs |
 |---|---|

@@ -10,6 +10,13 @@ visible/predicted, optional skeletons) and `fusion/server.py` feeds every camera
 from the tracker, other classes are grouped as before (ids ≥ 100000). Workers also send their auto-calibrated `pose`,
 which updates the map's camera positions. Tests: `python tests/test_tracker.py`.
 
+**Camera states (new, after `git pull` + restart of the server AND every camera worker):** each camera is
+TRUSTED (green on the map, weight 1) / DEGRADED (amber, weight 0.4: unverified or poor re-solve) / EXCLUDED
+(orange, no detections: markers say it moved) / OFFLINE (grey: unplugged, socket closed, or silent for 2.5 s; the
+server decides this itself). An OFFLINE/EXCLUDED camera's detections are dropped at once and people only it saw go
+"predicted". Workers check the corner markers on (re)connect and every 60 s (config/refresh.json; rules in
+calib/refresh.py). `GET /cameras` shows each camera's state, weight, fps, lag and reasons.
+
 ## Rules for the AI
 - **Camera indices are per laptop.** camB has no `source` in config/cameras.json on purpose. **Always pass `--source <N>`**,
   where N is camB's index **on this laptop**. Don't put a local index into cameras.json (camA's `source` is Mac-1's).
