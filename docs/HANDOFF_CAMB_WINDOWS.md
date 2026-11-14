@@ -6,9 +6,10 @@ This laptop only captures and pushes frames. It's an outbound connection only, s
 firewall changes are needed**.
 
 ## Rules for the AI on this machine
-- Only run the commands below. **Do not edit** `config/cameras.json`, `config/markers.json` or anything in
-  `calib/`. camB is calibrated from Mac-1, and editing those here causes merge conflicts.
-- Don't commit anything from this laptop unless Worker 2 asks. No recordings, weights or venv in git.
+- Only run the commands below. **Do not hand-edit** `config/cameras.json`, `config/markers.json` or anything
+  in `calib/`. The calibration scripts update camB's entry themselves.
+- Never set camB's `source` to a local index: on Mac-1 it must stay the relay URL.
+- Only commit `config/cameras.json`, via the calibration script's push prompt. No recordings, weights or venv in git.
 - The stream must **keep running**. Start it as a long-running/background process and don't stop it
   when your task ends.
 - Shell is **PowerShell**. Paths use `\`.
@@ -40,6 +41,16 @@ firewall changes are needed**.
    - Mac-1 is at `10.247.46.145` on the venue Wi-Fi. If that fails, ask Szymon for Mac-1's current IP
      (on Mac-1: `python tools/lan_ip.py`).
 
+## Calibrate camB (on this laptop, camera plugged in here, `<N>` from step 3)
+Stop the push (Ctrl+C) first: only one program can use the camera at a time.
+1. **Lens (chessboard), once per camera:** `.venv\Scripts\python -m calib.intrinsics camB --source <N>`
+   Move the 9x6 chessboard over the whole image, including the corners, tilted. Aim for RMS < 0.5 px.
+2. **Position (corner markers):** mount and tape the camera first, then
+   `.venv\Scripts\python -m calib.position camB --source <N>`
+   Wait for "GOOD - press S" (magenta outlines sit on the markers), then press S and answer Y to commit + push.
+3. Restart the push (step 4). Then tell Szymon "camB calibrated + streaming".
+If the camera moves: redo step 2 only.
+
 ## Check / troubleshoot
 | Output | Meaning / fix |
 |---|---|
@@ -52,9 +63,9 @@ firewall changes are needed**.
 ## Keep it running
 - Plugged in, lid open. Settings → System → Power → **Screen and sleep: Never** (while plugged in).
 - **Don't move or bump the camera** once mounted. Mac-1 calibrates its position in place. If it moves,
-  tell Szymon so he can re-run `calib.extrinsics camB`.
+  re-run `calib.position camB` (step 2 above).
 - To stop: Ctrl+C in that terminal. To restart: run the step 4 command again.
 
 ## What happens on Mac-1 (for context, nothing to do here)
 - The relay re-serves the frames at `http://127.0.0.1:8095/camB/stream.mjpg` (camB's `source` in `config/cameras.json`).
-- Szymon then runs `python -m calib.extrinsics camB` and `python -m tools.live_map` (camA + camB on one map).
+- Szymon pulls the calibration and runs `python -m tools.live_map` (camA + camB on one map).
