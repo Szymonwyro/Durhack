@@ -9,6 +9,7 @@ from typing import TypedDict
 
 import cv2
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from perception.detect import Detection, FrameDetections
 
@@ -29,6 +30,15 @@ class WorldDetection(TypedDict):
     bbox: list[float]
     image_point: list[float]
     position: list[float]
+
+
+class MatchedFloorDetection(TypedDict):
+    class_id: int
+    class_name: str
+    position: list[float]
+    cameras: list[str]
+    confidence_by_camera: dict[str, float]
+    observations: list[WorldDetection]
 
 
 class TriangulatedPoint(TypedDict):
@@ -277,3 +287,94 @@ def project_cameras(
             )
         projected[camera_id] = project_frame(frame, camera)
     return projected
+
+
+def match_floor_detections(
+    detections_by_camera: Mapping[str, Sequence[WorldDetection]],
+    max_distance_m: float = 0.75,
+) -> list[MatchedFloorDetection]:
+    """Match same-class floor detections across cameras by world-position distance.
+
+    Each camera contributes at most one observation to a group. Matching is
+    performed one camera at a time using a minimum-cost assignment, with
+    ``max_distance_m`` as the maximum allowed distance from an existing group.
+    """
+    if not np.isfinite(max_distance_m) or max_distance_m <= 0:
+        raise ValueError("max_distance_m must be a positive finite distance")
+
+    groups: list[list[WorldDetection]] = []
+    for camera_id, camera_detections in detections_by_camera.items():
+        for detection in camera_detections:
+            if detection["camera_id"] != camera_id:
+                raise ValueError(
+                    f"detection camera {detection['camera_id']!r} does not match "
+                    f"group key {camera_id!r}"
+                )
+            if len(detection["position"]) != 2 or not np.isfinite(detection["position"]).all():
+                raise ValueError(f"invalid floor position from camera {camera_id!r}")
+
+        if not groups:
+            groups.extend([[detection] for detection in camera_detections])
+            continue
+        if not camera_detections:
+            continue
+
+        group_positions = np.asarray(
+            [
+                np.mean([observation["position"] for observation in group], axis=0)
+                for group in groups
+            ],
+            dtype=np.float64,
+        )
+        costs = np.full(
+            (len(groups), len(camera_detections)),
+            max_distance_m + 1,
+            dtype=np.float64,
+        )
+        for group_index, group in enumerate(groups):
+            for detection_index, detection in enumerate(camera_detections):
+                if group[0]["class_id"] == detection["class_id"]:
+                    distance = float(
+                        np.linalg.norm(
+                            group_positions[group_index] - detection["position"]
+                        )
+                    )
+                    if distance <= max_distance_m:
+                        costs[group_index, detection_index] = distance
+
+        matched_detections: set[int] = set()
+        group_indices, detection_indices = linear_sum_assignment(costs)
+        for group_index, detection_index in zip(group_indices, detection_indices):
+            if costs[group_index, detection_index] <= max_distance_m:
+                groups[group_index].append(camera_detections[detection_index])
+                matched_detections.add(int(detection_index))
+
+        groups.extend(
+            [[detection] for index, detection in enumerate(camera_detections)
+             if index not in matched_detections]
+        )
+
+    matched: list[MatchedFloorDetection] = []
+    for group in groups:
+        weights = np.asarray(
+            [max(observation["confidence"], 0.0) for observation in group],
+            dtype=np.float64,
+        )
+        if weights.sum() == 0:
+            weights.fill(1.0)
+        positions = np.asarray([observation["position"] for observation in group])
+        position = np.average(positions, axis=0, weights=weights)
+        matched.append(
+            {
+                "class_id": group[0]["class_id"],
+                "class_name": group[0]["class_name"],
+                "position": [float(value) for value in position],
+                "cameras": [observation["camera_id"] for observation in group],
+                "confidence_by_camera": {
+                    observation["camera_id"]: observation["confidence"]
+                    for observation in group
+                },
+                "observations": group,
+            }
+        )
+    return matched
