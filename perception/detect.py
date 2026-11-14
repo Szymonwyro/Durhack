@@ -13,7 +13,7 @@ from collections.abc import Iterator, Sequence
 import json
 from pathlib import Path
 import time
-from typing import Callable, TypedDict
+from typing import Callable, NotRequired, TypedDict
 
 import cv2
 import numpy as np
@@ -26,6 +26,7 @@ class Detection(TypedDict):
     bbox: list[float]
     position: list[float]
     foot: list[float] | None
+    keypoints: NotRequired[list[list[float]]]  # pose models only: 17 x [x, y, conf], COCO-17, pixels
 
 
 class FrameDetections(TypedDict):
@@ -94,22 +95,32 @@ def detect_video(
                 time_seconds = frame_index / fps
 
             detections: list[Detection] = []
-            for box in result.boxes:
+            keypoints = getattr(result, "keypoints", None)  # pose models (e.g. yolo11n-pose.pt) only
+            if keypoints is not None and keypoints.conf is None:
+                keypoints = None
+            for index, box in enumerate(result.boxes):
                 class_id = int(box.cls[0].item())
                 class_name = result.names[class_id]
                 x1, y1, x2, y2 = (float(value) for value in box.xyxy[0].tolist())
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-                detections.append(
-                    {
-                        "class_id": class_id,
-                        "class_name": class_name,
-                        "confidence": float(box.conf[0].item()),
-                        "bbox": [x1, y1, x2 - x1, y2 - y1],
-                        "position": [center_x, center_y],
-                        "foot": [center_x, y2] if class_name == "person" else None,
-                    }
-                )
+                detection: Detection = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": float(box.conf[0].item()),
+                    "bbox": [x1, y1, x2 - x1, y2 - y1],
+                    "position": [center_x, center_y],
+                    "foot": [center_x, y2] if class_name == "person" else None,
+                }
+                if keypoints is not None:
+                    from perception.skeleton import foot_from_ankles
+
+                    xy = keypoints.xy[index].tolist()
+                    kc = keypoints.conf[index].tolist()
+                    detection["keypoints"] = [[float(p[0]), float(p[1]), float(c)] for p, c in zip(xy, kc)]
+                    if class_name == "person":
+                        detection["foot"] = foot_from_ankles(detection["keypoints"]) or detection["foot"]
+                detections.append(detection)
 
             frame_result: FrameDetections = {
                 "frame": frame_index,

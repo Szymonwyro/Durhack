@@ -19,10 +19,12 @@ import numpy as np
 from calib.auto_pose import AutoPose
 from calib.config_io import get_camera, parse_source
 from perception.detect import FrameDetections, detect_video
+from perception.skeleton import BONES, JOINT_MIN_CONF, lift_keypoints
 from perception.floor_project import CameraCalibration, project_detection
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_WEIGHTS = ROOT / "weights" / "yolo11n.pt"
+POSE_WEIGHTS = ROOT / "weights" / "yolo11n-pose.pt"
 MAX_PREVIEW_WIDTH = 640
 
 
@@ -44,6 +46,42 @@ def load_camera(camera_id: str, source_override: str | None) -> tuple[CameraCali
         "t": config.get("t"),
     }
     return calibration, parse_source(source)
+
+
+def draw_skeleton(image: np.ndarray, keypoints: list[list[float]]) -> None:
+    for a, b in BONES:
+        if keypoints[a][2] >= JOINT_MIN_CONF and keypoints[b][2] >= JOINT_MIN_CONF:
+            pa = (round(keypoints[a][0]), round(keypoints[a][1]))
+            pb = (round(keypoints[b][0]), round(keypoints[b][1]))
+            cv2.line(image, pa, pb, (255, 200, 0), 2)
+
+
+class PoseStats:
+    """--pose sanity log every 5 s: nose height, ankle height, valid joints, fps."""
+
+    def __init__(self, camera_id: str) -> None:
+        self.camera_id, self.t0 = camera_id, time.time()
+        self.frames, self.nose, self.ankle, self.joints = 0, [], [], []
+
+    def add(self, message: dict[str, Any]) -> None:
+        self.frames += 1
+        for d in message["detections"]:
+            kp = d.get("kp3d")
+            if not kp:
+                continue
+            self.joints.append(sum(j is not None for j in kp))
+            if kp[0]:
+                self.nose.append(kp[0][2])
+            ankles = [kp[i][2] for i in (15, 16) if kp[i]]
+            if ankles:
+                self.ankle.append(sum(ankles) / len(ankles))
+        now = time.time()
+        if now - self.t0 >= 5:
+            fmt = lambda v: f"{np.mean(v):.2f} m" if v else "-"  # noqa: E731
+            print(f"[{self.camera_id}] pose: nose z {fmt(self.nose)} (expect 1.5-1.8), ankle z {fmt(self.ankle)} "
+                  f"(expect 0.0-0.15), valid joints {np.mean(self.joints) if self.joints else 0:.1f}/17, "
+                  f"skeletons {len(self.joints)}, {self.frames / (now - self.t0):.1f} fps", flush=True)
+            self.__init__(self.camera_id)
 
 
 def make_message(
@@ -73,7 +111,13 @@ def make_message(
         if calibration.get("R") is None:  # no camera position yet (auto-pose still looking for markers)
             continue
         try:
-            world_detections.append(project_detection(detection, calibration))
+            world_detection = project_detection(detection, calibration)
+            if "keypoints" in detection:  # --pose: lift the skeleton onto the person's billboard plane
+                world_detection["kp3d"] = lift_keypoints(
+                    detection["keypoints"], detection["bbox"], world_detection["position"], calibration
+                )
+                draw_skeleton(annotated, detection["keypoints"])
+            world_detections.append(world_detection)
         except ValueError as error:
             print(
                 f"[{camera_id}] skipped unprojectable {detection['class_name']} "
@@ -138,6 +182,8 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
                 pass
             outbound.put_nowait(message)
 
+    pose_stats = PoseStats(camera_id) if args.pose else None
+
     def on_frame(frame: np.ndarray, result: FrameDetections) -> bool:
         if not warned and size[0] and (frame.shape[1], frame.shape[0]) != size:
             warned.append(True)
@@ -152,7 +198,10 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
             if update:
                 calibration["R"], calibration["t"] = update["R"], update["t"]
         pose = auto.pose if auto is not None else None
-        loop.call_soon_threadsafe(put_latest, make_message(camera_id, calibration, frame, result, pose))
+        message = make_message(camera_id, calibration, frame, result, pose)
+        if pose_stats is not None:
+            pose_stats.add(message)
+        loop.call_soon_threadsafe(put_latest, message)
         return not stop.is_set()
 
     def detect_camera() -> None:
@@ -226,7 +275,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=str(DEFAULT_WEIGHTS) if DEFAULT_WEIGHTS.is_file() else "yolo11n.pt",
+        default=None,
         help="YOLO weights",
     )
     parser.add_argument("--confidence", type=float, default=0.25, help="Minimum confidence, 0 to 1")
@@ -239,7 +288,17 @@ def main() -> None:
         help="re-calibrate the camera position from the corner markers every N seconds (first at startup); "
         "0 = use the saved position in config/cameras.json only",
     )
+    parser.add_argument(
+        "--pose",
+        action="store_true",
+        help="pose model (weights/yolo11n-pose.pt): foot from the ankles, 3D skeleton (kp3d) in each detection",
+    )
     args = parser.parse_args()
+    if args.model is None:
+        if args.pose:
+            args.model = str(POSE_WEIGHTS) if POSE_WEIGHTS.is_file() else "yolo11n-pose.pt"
+        else:
+            args.model = str(DEFAULT_WEIGHTS) if DEFAULT_WEIGHTS.is_file() else "yolo11n.pt"
     if not 0 <= args.confidence <= 1:
         parser.error("--confidence must be between 0 and 1")
 

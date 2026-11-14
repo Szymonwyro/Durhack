@@ -3,6 +3,8 @@
     # 1. (Mac-1, once) record:  python -m calib.capture camA --record 60
     # 2. (Mac-1, once) detect + project to the floor -> samples/test_walk_camA.jsonl (small, in git):
     python -m tools.test_walk make recordings/camA_<stamp>.mp4
+    python -m tools.test_walk make recordings/camA_<stamp>.mp4 --pose --out samples/test_walk_camA_pose.jsonl \
+        --cameras-json <cameras.json as it was when recorded>      # + 3D skeleton (kp3d) per detection
     # 3. (anyone) replay into a server's WS /ingest at the original pace, timestamps shifted to now:
     python3 tools/test_walk.py replay                                  # ws://127.0.0.1:8001/ingest, loops
     python3 tools/test_walk.py replay --url ws://127.0.0.1:8001/ingest --speed 2 --once
@@ -10,7 +12,7 @@
 
 Each line is a contract 'detection' message (CLAUDE.md / docs/CONTRACTS.md):
     {"cam":"camA","t":<unix>,"foot":[x,y],"bbox":[x,y,w,h],"conf":0.9}
-plus "frame" and "dt" (seconds since the start of the recording). The first line is a {"type":"meta",...} header
+plus "frame" and "dt" (seconds since the start of the recording), and with --pose "kp3d" (17 x [x,y,z,conf] | null). The first line is a {"type":"meta",...} header
 (camera pose, area, source video) that replay skips. Frames with nobody in them appear as
 {"cam":"camA","t":...,"frame":n,"dt":...,"empty":true} so gaps (person out of view) keep their timing; replay skips them too.
 `replay` needs only Python 3 + the `websockets` package (pip install websockets).
@@ -34,22 +36,24 @@ def make(a):
     from calib.config_io import get_camera
     from perception.detect import detect_video
     from perception.floor_project import project_detection
+    from perception.skeleton import lift_keypoints
 
     video = Path(a.video)
-    cam = get_camera(a.cam)
+    cam = get_camera(a.cam, a.cameras_json) if a.cameras_json else get_camera(a.cam)
     calib = {k: cam[k] for k in ("id", "K", "dist", "R", "t")}
     stamps_file = video.with_name(video.stem + "_timestamps.csv")
     stamps = [float(r["unix_t"]) for r in csv.DictReader(stamps_file.open())] if stamps_file.exists() else None
     t0 = stamps[0] if stamps else time.time()
-    out = Path(a.out)
+    out = Path(a.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    n_det = n_frames = n_cut = n_out = 0
+    n_det = n_frames = n_cut = n_out = n_skel = 0
     with out.open("w") as f:
         f.write(json.dumps({"type": "meta", "cam": a.cam, "video": video.name, "recorded_t0": t0,
                             "camera": {k: cam.get(k) for k in ("pos", "yaw", "fov", "width", "height")},
                             "area": {"x": [AREA[0], AREA[2]], "y": [AREA[1], AREA[3]]},
                             "note": "foot = floor point in metres (world frame); t = recording time; replay shifts t"}) + "\n")
-        for fr in detect_video(video, ROOT / "yolo11n.pt", confidence=a.conf, classes=[0], device=a.device):
+        weights = ROOT / "weights" / ("yolo11n-pose.pt" if a.pose else "yolo11n.pt")
+        for fr in detect_video(video, weights, confidence=a.conf, classes=[0], device=a.device):
             n_frames += 1
             i = fr["frame"]
             t = stamps[i] if stamps and i < len(stamps) else t0 + fr["time_seconds"]
@@ -64,8 +68,12 @@ def make(a):
                 if not (AREA[0] - MARGIN <= p[0] <= AREA[2] + MARGIN and AREA[1] - MARGIN <= p[1] <= AREA[3] + MARGIN):
                     n_out += 1
                     continue
-                f.write(json.dumps({**base, "foot": [round(p[0], 3), round(p[1], 3)],
-                                    "bbox": [round(v, 1) for v in d["bbox"]], "conf": round(d["confidence"], 2)}) + "\n")
+                row = {**base, "foot": [round(p[0], 3), round(p[1], 3)],
+                       "bbox": [round(v, 1) for v in d["bbox"]], "conf": round(d["confidence"], 2)}
+                if a.pose:
+                    row["kp3d"] = lift_keypoints(d.get("keypoints"), d["bbox"], p, calib)
+                    n_skel += row["kp3d"] is not None
+                f.write(json.dumps(row) + "\n")
                 kept += 1
             if not kept:
                 f.write(json.dumps({**base, "empty": True}) + "\n")
@@ -73,7 +81,7 @@ def make(a):
             if n_frames % 300 == 0:
                 print(f"{n_frames} frames, {n_det} detections", flush=True)
     print(f"{n_frames} frames -> {n_det} detections in {out.relative_to(ROOT)}  "
-          f"(dropped: {n_cut} feet cut off, {n_out} outside the area)")
+          f"(dropped: {n_cut} feet cut off, {n_out} outside the area)" + (f", {n_skel} with a skeleton" if a.pose else ""))
 
 
 def load(path):
@@ -102,6 +110,8 @@ async def replay(a):
             if "foot" not in r:
                 continue
             msg = {"cam": r["cam"], "t": time.time(), "foot": r["foot"], "bbox": r["bbox"], "conf": r["conf"]}
+            if r.get("kp3d") is not None:
+                msg["kp3d"] = r["kp3d"]
             if ws is None:
                 print(json.dumps(msg), flush=True)
             else:
@@ -124,6 +134,8 @@ def main():
     m.add_argument("--out", default=str(DEFAULT_OUT))
     m.add_argument("--conf", type=float, default=0.4)
     m.add_argument("--device", default=None, help="mps / cpu / cuda")
+    m.add_argument("--pose", action="store_true", help="pose model + 3D skeleton (kp3d) per detection")
+    m.add_argument("--cameras-json", help="cameras.json to take the pose from (default config/cameras.json)")
     r = sub.add_parser("replay", help="send the JSONL to a server's WS /ingest")
     r.add_argument("file", nargs="?", default=str(DEFAULT_OUT))
     r.add_argument("--url", default="ws://127.0.0.1:8001/ingest")
