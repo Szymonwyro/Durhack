@@ -59,6 +59,25 @@ camA and camB reconnect by themselves.
 `auto-pose: ...` line. Check `http://10.247.206.87:8010/health`: `"camC": {"online": true, "fps": ..., "lag_ms": ...,
 "clock": "synced"}`.
 
+## Skeletons on this camera (`--pose`)
+Same worker, one extra flag. It draws the skeleton on this camera's feed and sends 3D joints to the server, so the
+map (tick **Skeletons**) and `/tracks` carry a skeleton for everyone this camera sees.
+1. `git pull` on `main` (on `feat/boxes`: `git pull --rebase origin main` first).
+2. Stop the running worker for this camera (Ctrl+C), then start it again with `--pose` added:
+   ```
+   python -m tools.camera_worker <camId> --source N --server ws://<server>:8010/ingest/<camId> --classes 0 --pose
+   ```
+   `<camId>` = this laptop's camera (e.g. `camB`), `N` = its camera number here, `<server>` = `127.0.0.1` if the
+   fusion server runs on this laptop, otherwise the address in README "Live server". Add `--device mps` on an Apple
+   Silicon Mac or `--device 0` with an NVIDIA GPU. Windows: `.venv\Scripts\python`; macOS: `.venv/bin/python`.
+3. The first run downloads the pose model (`yolo11n-pose.pt`, ~6 MB; needs internet once).
+4. **Check the log.** Every 5 s: `pose: nose z 1.5-1.8 m, ankle z 0.0-0.15 m, valid joints 12+/17, ... fps`.
+   - ankles near 0 = working. Nose low or `-` = heads are out of frame: tilt the camera up so people fit head to toe.
+   - `skeletons 0` = people too small (< 120 px tall) or fewer than 8 joints visible: move/aim the camera.
+   - a `refresh:` line must end in `TRUSTED` (or `DEGRADED`); an `EXCLUDED` camera sends no skeletons.
+5. Check `http://<server>:8010/`: this camera's feed tile shows bones on each person. Aim for ≥ 10 fps.
+The server needs no change (it must be on current `main`). Without `--pose` everything behaves as before.
+
 ## Troubleshooting
 | Symptom | Fix |
 |---|---|
