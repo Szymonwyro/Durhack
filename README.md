@@ -16,6 +16,7 @@ terminal command to run a worker : python -m tools.camera_worker camB --source 1
   `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://10.247.206.87:8010/tracks`
   (bridge needs `pip install aiohttp websockets`). The Quest then uses `http://localhost:8001/quest/` as usual.
 - Camera workers send to `ws://10.247.206.87:8010/ingest/<camId>`.
+- **Jack / camC:** follow docs/HANDOFF_CAMC_JACK.md. After camC is pushed, Caspar must `git pull` + restart the server.
 - **Caspar / camB (laptop 2):** follow docs/HANDOFF_LAPTOP2_SERVER_CAMB.md (redo camB's position, then):
   `python -m tools.camera_worker camB --source N --server ws://10.247.206.87:8010/ingest/camB --classes 0`
 - Use `--margin 0.2` on fusion_to_quest so bystanders next to the square aren't shown; keep others out of the square.

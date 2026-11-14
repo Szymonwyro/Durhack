@@ -112,12 +112,12 @@ def main():
     p.add_argument("--no-push", action="store_true", help="save locally only, don't offer to commit/push")
     a = p.parse_args()
 
-    cfg = get_camera(a.cam_id)
-    if not cfg or "K" not in cfg:
-        sys.exit(f"{a.cam_id}: no lens calibration (K) in config/cameras.json. git pull, or run the chessboard first:\n"
-                 f"  python -m calib.intrinsics {a.cam_id} --source <N>")
     git("pull", "--rebase", "--autostash")  # best effort: start from the latest config
     cfg = get_camera(a.cam_id)
+    if not cfg or "K" not in cfg:  # new camera: still show the picker so the user learns its number
+        source = a.source if a.source is not None else pick_source()
+        sys.exit(f"{a.cam_id} is camera {source!r}, but it has no lens calibration (K) yet. Run the chessboard first:\n"
+                 f"  python -m calib.intrinsics {a.cam_id} --source {source} --width 1280 --height 720")
     source = a.source if a.source is not None else pick_source()
 
     cam = Camera(source, cfg["width"], cfg["height"], name=a.cam_id)
