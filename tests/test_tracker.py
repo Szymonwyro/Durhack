@@ -66,8 +66,8 @@ if __name__ == "__main__":
 def test_empty_frames_dont_inflate():
     tr = Tracker()
     t = 3000.0
-    for i in range(5):
-        tr.camera_frame("camA", [det(0.5, 0.5)], t + 0.1 * i)
+    for i in range(12):  # an established person (>= SHORT_HITS detections)
+        tr.camera_frame("camA", [det(0.5, 0.5)], t + 0.04 * i)
     for i in range(30):  # 3 s of empty frames from a streaming camera
         tr.camera_frame("camA", [], t + 0.5 + 0.1 * i)
     o = tr.tracks(t + 3.4)
@@ -77,3 +77,24 @@ def test_empty_frames_dont_inflate():
 if __name__ == "__main__":
     test_empty_frames_dont_inflate()
     print("empty-frame test passed")
+
+
+def test_no_ghosts():
+    tr = Tracker()
+    t = 4000.0
+    tr.camera_frame("camA", [det(1.0, 1.0), det(0.2, 1.4)], t)             # blip at (0.2, 1.4): seen once
+    for i in range(1, 20):
+        tr.camera_frame("camA", [det(1.0, 1.0)], t + 0.033 * i)
+    out = tr.tracks(t + 0.66)
+    assert len(out) == 1 and out[0]["pos"][0] > 0.9                          # blip never shown
+    for i in range(5):                                                        # half-visible person: 5 frames
+        tr.camera_frame("camA", [det(1.0, 1.0), det(0.3, 0.3)], t + 0.7 + 0.033 * i)
+    assert len(tr.tracks(t + 0.85)) == 2
+    for i in range(40):
+        tr.camera_frame("camA", [det(1.0, 1.0)], t + 0.9 + 0.033 * i)
+    assert len(tr.tracks(t + 2.3)) == 1                                       # short track gone after 1 s unseen
+
+
+if __name__ == "__main__":
+    test_no_ghosts()
+    print("ghost test passed")

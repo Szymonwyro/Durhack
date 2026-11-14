@@ -9,7 +9,7 @@ Run on the machine the Quest is plugged into, next to the bridge:
     ./quest/dev.sh live                                                    # or: Role 1's dev loop with the bridge
 Options: --bridge ws://127.0.0.1:8001/ingest (default), --margin 0.75 (m around the marker square), --print (show what would be sent, no bridge needed).
 
-Only `person` tracks are forwarded, and each position only once (the fusion server repeats a camera's last frame
+Only `person` tracks in state `visible` are forwarded (predicted ones would look like fresh sightings to the bridge), and each position only once (the fusion server repeats a camera's last frame
 for up to 1.5 s, and repeats would freeze the Kalman velocity). Timestamps are this machine's receive time,
 because laptop clocks differ. Needs only Python 3 + `pip install websockets` (the bridge itself needs `pip install aiohttp`).
 """
@@ -47,6 +47,8 @@ async def run(a):
                     for tr in msg.get("tracks", []):
                         if tr.get("class_name", "person") != "person" or not tr.get("pos"):
                             continue
+                        if tr.get("state", "visible") != "visible":
+                            continue  # predicted = no camera sees them: the bridge predicts itself; forwarding would fake sightings
                         pos = (round(float(tr["pos"][0]), 3), round(float(tr["pos"][1]), 3))
                         if not (x0 - a.margin <= pos[0] <= x1 + a.margin and y0 - a.margin <= pos[1] <= y1 + a.margin):
                             continue  # someone outside the demo area (sofas, passers-by)

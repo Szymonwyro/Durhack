@@ -26,8 +26,16 @@ DROP_2SIGMA_M = 3.0
 GATE_M = 1.0              # max distance from a track (plus 2 sigma) to accept a detection
 MEAS_SIGMA = 0.10         # m, detection noise
 ACCEL_SIGMA = 0.8         # m/s^2, process noise (filtering between detections)
+MAX_EXTRAPOLATE_S = 1.5   # predicted tracks keep moving with their velocity for at most this long, then hold
 GROWTH = 0.35             # m/s, position sigma growth while extrapolating (same as quest/tools/bridge.py)
 NEW_TRACK_SIGMA = 0.3     # m, initial position uncertainty; velocity starts at 0 +- 1 m/s
+
+CONFIRM_HITS = 3          # detections before a new track is shown (blips / half-visible people never appear)
+TENTATIVE_DROP_S = 0.3    # an unconfirmed track not seen for this long is deleted
+SHORT_HITS = 10           # tracks with fewer detections in total (~0.3 s at 30 fps) ...
+SHORT_DROP_S = 1.0        # ... are dropped after 1 s unseen instead of being predicted for 8 s
+MERGE_M = 0.6             # a predicted track this close to a visible one is the same person -> dropped
+SAME_FRAME_M = 0.4        # detections from one camera frame closer than this are one person (duplicate boxes)
 
 SKEL_SOURCE_WINDOW_S = 0.3
 SKEL_ALPHA = 0.5
@@ -49,7 +57,8 @@ def valid_kp3d(kp3d):
 
 class Track:
     def __init__(self, pos, t, cam):
-        self.id = next(_ids)
+        self.id = None              # assigned when confirmed (CONFIRM_HITS), so blips don't use up ids
+        self.hits = 1
         self.x = np.array([pos[0], pos[1], 0.0, 0.0])
         self.P = np.diag([NEW_TRACK_SIGMA ** 2] * 2 + [1.0] * 2)
         self.t = t                  # time of the state estimate
@@ -87,12 +96,15 @@ class Track:
         self.last_seen = t
         self.pos_at_last_seen = self.x[:2].copy()
         self.seen[cam] = t
+        self.hits += 1
+        if self.id is None and self.hits >= CONFIRM_HITS:
+            self.id = next(_ids)
 
     def state_at(self, now):
         """(pos, vel, cov) extrapolated to `now` without changing the filter: constant velocity, position sigma
         growing linearly (GROWTH m/s), so a predicted track's 2-sigma reaches 3 m after ~4 s."""
         dt = max(0.0, now - self.t)
-        pos = self.x[:2] + self.x[2:] * dt
+        pos = self.x[:2] + self.x[2:] * min(dt, MAX_EXTRAPOLATE_S)
         cov = self.P[:2, :2] + np.eye(2) * (GROWTH * dt) ** 2
         return pos, self.x[2:], cov
 
@@ -151,7 +163,11 @@ class Tracker:
 
     def camera_frame(self, cam, detections, now):
         """detections: world detections from one camera frame (dicts with position, class_name, bbox, kp3d?)."""
-        people = [d for d in detections if d.get("class_name", "person") == "person"]
+        people = []  # one camera can't see one person twice: merge duplicate boxes (keep the most confident)
+        for d in sorted((d for d in detections if d.get("class_name", "person") == "person"),
+                        key=lambda d: -float(d.get("confidence", d.get("conf", 0.0)))):
+            if all(math.dist(d["position"], q["position"]) >= SAME_FRAME_M for q in people):
+                people.append(d)
         if self.tracks_ and people:
             cost = np.full((len(self.tracks_), len(people)), 1e6)
             for i, tr in enumerate(self.tracks_):
@@ -179,14 +195,27 @@ class Tracker:
 
     def tracks(self, now):
         out, keep = [], []
+        # older confirmed tracks first: when two overlap, the older id survives
+        self.tracks_.sort(key=lambda tr: (tr.id is None, tr.id or 0))
+        visible_pos = []
         for tr in self.tracks_:
             pos, vel, cov = tr.state_at(now)
             unseen = now - tr.last_seen
+            if tr.id is None:  # tentative: never shown; deleted if it doesn't get confirmed quickly
+                if unseen <= TENTATIVE_DROP_S:
+                    keep.append(tr)
+                continue
             predicted = unseen > PREDICT_AFTER_S
+            if not predicted and any(math.dist(pos, v) < MERGE_M for v in visible_pos):
+                continue  # duplicate of an older visible track
             if predicted and (unseen > DROP_PREDICTED_S + PREDICT_AFTER_S
-                              or 2 * math.sqrt(max(cov[0, 0], cov[1, 1])) > DROP_2SIGMA_M):
+                              or (tr.hits < SHORT_HITS and unseen > SHORT_DROP_S)
+                              or 2 * math.sqrt(max(cov[0, 0], cov[1, 1])) > DROP_2SIGMA_M
+                              or any(math.dist(pos, v) < MERGE_M for v in visible_pos)):
                 continue
             keep.append(tr)
+            if not predicted:
+                visible_pos.append(pos)
             msg = {"id": tr.id, "state": "predicted" if predicted else "visible",
                    "class_id": 0, "class_name": "person",
                    "pos": [round(float(pos[0]), 3), round(float(pos[1]), 3)],
