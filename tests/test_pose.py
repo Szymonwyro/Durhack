@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from perception.skeleton import billboard_plane, camera_centre, foot_from_ankles, lift_keypoints  # noqa: E402
+from perception.pose import billboard_plane, camera_centre, foot_from_ankles, lift_keypoints  # noqa: E402
 
 K = np.array([[1060.0, 0, 640], [0, 1060.0, 360], [0, 0, 1]])
 DIST = np.array([0.17, -0.8, 0.0, 0.0, 0.88])  # realistic distortion (camA-like) to exercise undistortPoints
