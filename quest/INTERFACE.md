@@ -154,15 +154,19 @@ Each track may carry a skeleton; omitted when there is none. Clients that don't 
 
 ```json
 {"id":7, "state":"visible", "pos":[2.10,3.40], ...,
- "skeleton": {"kp": [[2.08,3.41,1.66,0.93], null, ...17 entries], "src":"camB", "age":0.12, "frozen":false}}
+ "skeleton": {"kp": [[2.08,3.41,1.66,0.93], null, ...17 entries], "src":"camB", "age":0.12, "frozen":false},
+ "height_m":1.74, "posture":"standing", "heading_deg":90.0}
 ```
 
 - `kp`: exactly 17 joints in COCO-17 order, each `[x, y, z, conf]` in world metres (z up, floor = 0), or `null` if
   unknown. Joints come from one camera, lifted onto a vertical plane through the foot point that faces that camera:
   height and sideways position are good, depth along that camera's view is approximate (~±0.2 m).
-- `src`: camera the joints came from. `age`: seconds since that camera last saw them.
-- `frozen`: `true` while the track is `predicted`. The last skeleton is moved with the track (Kalman displacement since
+- `src`: one camera id, or `"fused:camA+camB"` when several cameras' joints were fused (then depth is good too).
+  `age`: seconds since a camera last saw the joints.
+- `frozen`: `true` = extrapolated, no camera currently sees the joints (track `predicted`). The last skeleton is moved with the track (Kalman displacement since
   `last_seen`) but the pose is not updated. Dropped after 3 s frozen. Suggest drawing frozen skeletons dimmer/dashed.
+- Posture fields (optional, from Caspar's feat/boxes; may be absent): `height_m` (float, m), `posture`
+  (`standing` | `crouching` | `lying`), `heading_deg` (degrees CCW from +x), `alert` (`casualty_down`, only while raised).
 - Path: worker `detection.kp3d` → fusion server (best view, EMA-smoothed, null joints held 0.5 s) → `/tracks` →
   `tools/fusion_to_quest.py` → `quest/tools/bridge.py` (passes it through untouched) → Quest.
 

@@ -25,7 +25,7 @@ The server URL comes from `config/server.json` or the `SERVER_URL` env var. Neve
 ```json
 {"cam": "camA", "t": 1731500000.123, "foot": [x, y], "bbox": [x, y, w, h], "conf": 0.9}
 ```
-- `foot` is in world metres. `bbox` is in image pixels.
+- `foot` is in world metres (with `kp3d`: the point the skeleton stands on, i.e. its root; ankle midpoint when both ankles are confident, else the bbox bottom-centre). `bbox` is in image pixels.
 - Optional stretch field: `"mask_png": "<b64>"`.
 - Optional **`kp3d`** (pose skeleton, worker run with `--pose`): exactly 17 entries in COCO-17 order (below), each
   `[x, y, z, conf]` in world metres (z up, floor = 0) or `null` for a joint not seen (conf < 0.3). Omitted or `null`
@@ -52,12 +52,16 @@ The server uses an active zone as a loose position measurement: its centroid, wi
 - `visible`: some camera saw the track recently. `predicted`: no camera has seen it for more than 0.5 s, so the position is a Kalman prediction (sigma grows 0.35 m/s). Dropped after 8 s predicted or once 2σ > 3 m (~4 s). Implemented in fusion/tracker.py; `id` is stable per person. The server also sends `class_id`/`class_name` (map) and groups other classes per frame with ids ≥ 100000 (no vel/cov); viewers should use `class_name == "person"` only.
 - **The server does not send "hidden".** Each viewer decides hidden vs visible itself, by testing line of sight from its own position to the track against the walls.
 - Optional **`skeleton`** per track (omitted when the track has none):
-  `{"kp": [[x, y, z, conf] | null, ... 17], "src": "camB", "age": 0.12, "frozen": false}`
+  `{"kp": [[x, y, z, conf] | null, ... 17], "src": "camB" | "fused:camA+camB", "age": 0.12, "frozen": false}`
   - `kp`: 17 joints, COCO-17 order, world metres (z up), `null` = joint unknown. Smoothed by the server.
-  - `src`: camera the joints came from (the one with the best view: highest mean joint conf, tie → larger bbox).
-  - `age`: seconds since that camera last saw the joints.
-  - `frozen`: `true` while the track is `predicted`. The last skeleton is translated with the Kalman displacement
-    since `last_seen` (pose not updated). Dropped after 3 s frozen.
+  - `src`: one camera id, or `"fused:camA+camB"` (ids sorted, joined with `+`) when several cameras' joints were fused.
+  - `age`: seconds since a camera last saw the joints.
+  - `frozen`: `true` = extrapolated, no camera currently sees the joints (track `predicted`). The last skeleton is
+    translated with the Kalman displacement since `last_seen` (pose not updated). Dropped after 3 s frozen.
+- Optional **posture fields** per track (Caspar, branch feat/boxes; defined here, clients must tolerate their absence):
+  `"height_m": 1.74` (estimated standing height, m), `"posture": "standing" | "crouching" | "lying"`,
+  `"heading_deg": 90.0` (direction the person faces/moves, degrees CCW from +x, same convention as camera `yaw`),
+  `"alert": "casualty_down"` (only present while raised).
 
 ### Camera states (optional fields, backward compatible)
 | State | Weight | Meaning | Map colour |
