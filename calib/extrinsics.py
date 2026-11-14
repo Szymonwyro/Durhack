@@ -5,8 +5,9 @@
 
 Needs K/dist for the camera first (calib/intrinsics.py) and marker positions in config/markers.json.
 The camera must be FIXED (taped down) before running this. Moving it afterwards means re-running.
-More markers spread across the view = better. One marker alone works but can be ambiguous/flip.
-Check: the drawn world axes sit on marker ID 0 (x red, y green, z blue up), the reprojected
+Ideally 2+ corner markers in view; more = better. One marker alone works but can be ambiguous/flip.
+Markers: only the corner markers 1, 3, 5, 7 in config/markers.json (ID 1 = origin). Other IDs are ignored (drawn red).
+Check: the drawn world axes sit on marker ID 1 (x red towards ID 3, y green towards ID 7, z blue up), the reprojected
 outlines (magenta) sit on the real markers, error < ~3 px, and the camera height looks right.
 """
 import argparse

@@ -55,11 +55,11 @@ Accepting the cert:
 - Websockets have to use `wss://` on the same host:port as the page.
 
 ## Printing
-Files: `printables/markers.pdf` (ArUco DICT_4X4_50, IDs 0-9, 180 mm) and `printables/chessboard.pdf` (9x6 inner corners, 25 mm). Regenerate with `python tools/make_printables.py`.
+Files: `printables/markers.pdf` (ArUco DICT_4X4_50, IDs 0-9, 180 mm; we use only **1, 3, 5, 7**) and `printables/chessboard.pdf` (9x6 inner corners, 25 mm). Regenerate with `python tools/make_printables.py`.
 - Print on A4 at **100% / "Actual size"**. Turn **off** "Fit to page" / "Shrink to fit".
 - Measure the **100 mm scale bar** on every page. If it's not 100 mm ± 1, reprint.
 - Mount on stiff card or foam board and keep the white margin. Matte paper reduces glare.
-- ID 0 is the world origin and lies flat on the floor. Use the other IDs on walls (viewer localisation) or as extra floor references.
+- Corner markers 1, 3, 5, 7 lie flat on the floor at the corners of the space. ID 1 is the origin, 3 is along +x, 7 is along +y, 5 is the opposite corner. Lay them all the same way round, with the label towards the ID1–ID3 edge. Measure their centres into `config/markers.json`.
 
 ## Layout
 ```

@@ -13,7 +13,7 @@ Everyone else watches the Quest's view cast to a Mac, next to the command map.
 
 ## Before the judges arrive (≤ 2 min)
 - [ ] Quest charged (>50%). The headset is in the browser on the viewer page, **already in AR** (started with "Enter AR"), with tracks updating
-- [ ] Two-point alignment done in the last few minutes: the virtual marker sits on marker ID 0
+- [ ] Two-point alignment done in the last few minutes: the virtual marker sits on corner marker ID 1
 - [ ] Quest casting to a Mac browser (oculus.com/casting), shown big next to the command map
 - [ ] Judge spot marked with tape, facing the cardboard wall; Quest boundary covers that spot
 - [ ] Quest won't sleep when taken off. Test this beforehand: try
@@ -42,7 +42,7 @@ Take the headset back, then point at the command map: "Here's the same picture f
 ## If something goes wrong
 | Problem | Do this |
 |---|---|
-| Ghosts are offset from the walker | Handler presses "re-align" (ID 0, then the +x marker) and carries on talking |
+| Ghosts are offset from the walker | Handler presses "re-align" (ID 1, then ID 3) and carries on talking |
 | Quest went to sleep or left AR | Handler re-enters AR; it uses the saved alignment |
 | Tracks frozen | Operator checks Mac-1 server / network (`tools/net_check.py`) |
 | Quest unusable | Hand over the iPhone running web/viewer/ (2D overlay), or play the backup video |

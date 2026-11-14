@@ -18,8 +18,8 @@
    switch to immersive-vr with a room replica and tell the team.)
 3. Mock data: until Role 2's server is up, use a local JS mock (one person walking a loop).
    Then connect to wss://<server>/tracks and GET /world.
-4. Two-point alignment: trigger on marker ID 0 (origin), then on a second marker at a known
-   +x distance. Compute the rotation and offset from Quest local space to world space. Save it
+4. Two-point alignment: trigger on corner marker ID 1 (origin), then on ID 3 (along +x, distance from
+   config/markers.json). Compute the rotation and offset from Quest local space to world space. Save it
    in localStorage (wrapped in try/catch) and add a "re-align" button.
    Done when: a virtual marker drawn at world (0,0) sits on the real marker within ~10 cm.
 5. Rendering (world → Quest local space):
@@ -72,9 +72,9 @@
 3. Record 2–3 min of clips from each camera into recordings/ and AirDrop them to Role 2.
 4. Lens calibration: calib/intrinsics.py with the chessboard (~15 views per camera)
    → K and dist into config/cameras.json.
-5. Physical setup: lay out the demo area, place marker ID 0, build cardboard walls,
+5. Physical setup: lay out the demo area, place corner markers 1, 3, 5, 7 (ID 1 = origin; measure them into config/markers.json), build cardboard walls,
    measure them into config/walls.json, mount and tape the cameras, design the blind spot.
-   Then calib/extrinsics.py: solvePnP on floor markers → R, t per camera.
+   Then calib/extrinsics.py: solvePnP on the corner markers → R, t per camera.
    Done when: reprojected marker corners land within a few pixels of the detected ones.
 6. UNO Q (edge/): App Lab first-time setup over USB (Wi-Fi + password), SSH in, USB camera
    via a powered hub, run Role 2's worker as camB (or stream frames to Mac-1 if under 2 fps).

@@ -13,6 +13,13 @@ from reportlab.pdfgen import canvas
 OUT = Path(__file__).resolve().parent.parent / "printables"
 MARKER_MM = 180.0
 DICT_NAME = "DICT_4X4_50"
+# Only these IDs are used: corner markers flat on the floor (config/markers.json)
+CORNER_ROLES = {
+    1: "CORNER ID 1 = world origin. Flat on floor, label towards the ID1-ID3 edge",
+    3: "CORNER ID 3 = along +x from ID 1. Flat on floor, label towards the ID1-ID3 edge",
+    5: "CORNER ID 5 = opposite ID 1. Flat on floor, label towards the ID1-ID3 edge",
+    7: "CORNER ID 7 = along +y from ID 1. Flat on floor, label towards the ID1-ID3 edge",
+}
 
 
 def scale_bar(c, x, y, length_mm=100, note=True):
@@ -52,9 +59,10 @@ def markers():
         c.setFillColorRGB(0, 0, 0)
         c.setFont("Helvetica", 9)
         c.drawCentredString(W / 2, y0 - 7 * mm, f"{DICT_NAME}  ID {mid}  |  black square = {MARKER_MM:.0f} mm")
-        if mid == 0:
+        role = CORNER_ROLES.get(mid)
+        if role:
             c.setFont("Helvetica-Bold", 11)
-            c.drawCentredString(W / 2, y0 - 14 * mm, "ID 0 = world origin, lay flat on floor")
+            c.drawCentredString(W / 2, y0 - 14 * mm, role)
         c.setFont("Helvetica", 8)
         c.drawCentredString(W / 2, y0 - 20 * mm, "Keep the white margin around the marker. Do not trim into it.")
         scale_bar(c, (W - 100 * mm) / 2, 30 * mm)

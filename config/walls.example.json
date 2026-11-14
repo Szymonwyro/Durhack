@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to walls.json. Wall segments on the floor plane in world metres (ID 0 marker = origin). Same shape as the 'walls' list in the world message (docs/CONTRACTS.md).",
+  "_comment": "Copy to walls.json. Wall segments on the floor plane in world metres (corner marker ID 1 = origin). Same shape as the 'walls' list in the world message (docs/CONTRACTS.md).",
   "walls": [
     {"a": [1.0, 0.0], "b": [1.0, 1.5], "h": 2.0},
     {"a": [2.0, 2.0], "b": [3.0, 2.0], "h": 2.0}

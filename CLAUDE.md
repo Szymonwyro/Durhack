@@ -24,7 +24,7 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   (PIR, buzzer, LEDs, resistors as available)
 - iPhones (all team phones): Personal Hotspot, fallback 2D AR viewer (no WebXR on iOS),
   Quest casting via the Meta Horizon app, optional Continuity Camera webcam
-- Printed ArUco markers (DICT_4X4_50, 180 mm, ID 0 = world origin flat on floor), chessboard (9x6, 25 mm)
+- Printed ArUco corner markers IDs 1, 3, 5, 7 (DICT_4X4_50, 180 mm, flat on the floor; ID 1 = origin), chessboard (9x6, 25 mm)
 - No travel router (see Networking)
 
 ## Networking (no router)
@@ -81,7 +81,10 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 | iPhones | Personal Hotspot, fallback 2D AR viewer (web/viewer/), casting display |
 
 ## World frame (fixed — do not change without telling the team)
-ArUco ID 0 flat on the floor = origin. Metres. x,y on the floor, z up. Person height 1.75 m.
+Corner markers ArUco 1, 3, 5, 7 flat on the floor (config/markers.json): ID 1 = origin, ID 3 along +x,
+ID 7 along +y, ID 5 opposite corner; all laid the same way round (label towards the ID1-ID3 edge).
+Metres. x,y on the floor, z up. Person height 1.75 m. Only IDs 1, 3, 5, 7 are used.
+Calibration: calib/intrinsics.py (chessboard) then calib/extrinsics.py (corner markers) -> config/cameras.json.
 
 ## Message contracts (see docs/CONTRACTS.md; additions here)
 - detection (camera worker → server, WebSocket /ingest):

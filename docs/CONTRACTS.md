@@ -3,7 +3,7 @@
 Shared file: change it only after telling the team. If this file and CLAUDE.md disagree, CLAUDE.md wins.
 
 ## World frame
-- Origin: ArUco **ID 0** (DICT_4X4_50, 180 mm), lying flat on the floor.
+- Corner markers ArUco **1, 3, 5, 7** (DICT_4X4_50, 180 mm) lie flat on the floor at the corners of the demo space (config/markers.json). ID 1 = origin, ID 3 along +x, ID 7 along +y, ID 5 the opposite corner. All four are laid the same way round, with the printed label towards the ID1-ID3 edge. No other marker IDs are used.
 - Units: **metres**. `x`, `y` lie on the floor plane and `z` points up (right-handed).
 - Assumed person height: **1.75 m**.
 - Timestamps: unix seconds (float).

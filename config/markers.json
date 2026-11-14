@@ -1,11 +1,11 @@
 {
-  "_comment": "Floor ArUco markers in world metres. ID 0 = origin. MEASURE positions with a tape and edit. yaw_deg = rotation of the print about z (0 = print's top points along world +y). Lay ID 0 with its ID label nearest you: world +x = right, +y = away from you (towards the top of the print).",
+  "_comment": "Corner markers of the demo space, flat on the floor, world metres. ONLY IDs 1, 3, 5, 7 are used. ID 1 = origin corner; ID 3 = along +x; ID 5 = opposite corner; ID 7 = along +y (1->3->5->7 anticlockwise seen from above). x/y are marker CENTRES: measure them with a tape and edit (placeholder 3 m x 3 m). Check squareness: diagonal 1->5 = sqrt(W^2 + D^2). Lay all four the same way round, printed ID label towards the ID1-ID3 edge (yaw_deg 0 = top of the print points along +y).",
   "dictionary": "DICT_4X4_50",
   "size_m": 0.18,
   "markers": [
-    {"id": 0, "x": 0.0, "y": 0.0, "yaw_deg": 0},
-    {"id": 1, "x": 2.0, "y": 0.0, "yaw_deg": 0},
-    {"id": 2, "x": 0.0, "y": 2.0, "yaw_deg": 0},
-    {"id": 3, "x": 2.0, "y": 2.0, "yaw_deg": 0}
+    {"id": 1, "x": 0.0, "y": 0.0, "yaw_deg": 0},
+    {"id": 3, "x": 3.0, "y": 0.0, "yaw_deg": 0},
+    {"id": 5, "x": 3.0, "y": 3.0, "yaw_deg": 0},
+    {"id": 7, "x": 0.0, "y": 3.0, "yaw_deg": 0}
   ]
 }
