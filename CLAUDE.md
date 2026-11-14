@@ -23,7 +23,25 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   (PIR, buzzer, LEDs, resistors as available)
 - Phones (fallback viewer, casting the Quest view)
 - Printed ArUco markers (DICT_4X4_50, 180 mm, ID 0 = world origin flat on floor), chessboard (9x6, 25 mm)
-- Travel router: ALL devices on one network; re-run tools/make_certs.sh on that network
+- No travel router (see Networking)
+
+## Networking (no router)
+- **First check:** venue Wi-Fi may block device-to-device traffic (client isolation). Run
+  `tools/net_check.py <server_url>` from another device before relying on it.
+- **Primary:** one phone's personal hotspot (or Windows Mobile Hotspot); all devices join it.
+  iPhone hotspot ≈5 devices max: Mac-1, Mac-2, Quest, UNO Q (+ Windows if room). Keep the phone charging.
+  After joining (and every time the hotspot changes): `tools/make_certs.sh` on Mac-1, then set
+  `lan_url` in config/server.json.
+- **Fallback:** cloudflared quick tunnel on Mac-1 (`tools/tunnel.sh`) → public https URL with a
+  valid cert, works from any network, adds ~50-150 ms (fine for detections/tracks, not video).
+  It writes `tunnel_url` into config/server.json; the URL changes on every run.
+- **Quest dev:** USB + `adb reverse tcp:8000 tcp:8000` (`tools/quest_usb.sh`) → http://localhost:8000
+  (secure context, no cert needed). Caveat: a server running TLS on 8000 doesn't answer plain http,
+  so use https://localhost:8000 (accept the cert once) or serve plain HTTP for the Quest.
+- **Server URL:** all clients read it from config/server.json
+  (`{"mode":"lan|tunnel|usb","lan_url":...,"tunnel_url":...,"usb_url":...}`) or the SERVER_URL env var,
+  via `config/server_url.py` (Python) / `config/server_url.js` (browser; `?server=` / `?mode=` override).
+  Never hard-code IPs: they change every time we switch network.
 
 ## Device roles
 | Device | Runs |

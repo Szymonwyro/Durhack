@@ -1,12 +1,14 @@
 # Steps per role (do them in order; each has a "done when")
 
 ## Role 1 — Meta Quest (quest/)
-1. Quest setup: Developer Mode on (Meta Horizon phone app), connect to the team router,
+1. Quest setup: Developer Mode on (Meta Horizon phone app), connect to the team network (hotspot or venue Wi-Fi),
    USB debugging via Meta Quest Developer Hub / adb on the Windows PC.
    Done when: `adb devices` lists the Quest.
 2. Passthrough smoke test: quest/index.html with three.js (ES module from a CDN or vendored),
    "Enter AR" button → navigator.xr.requestSession('immersive-ar') → floating cyan cube.
    Serve it from Mac-1's HTTPS server; open it once in the Quest browser and accept the cert.
+   During development you can skip the cert: plug the Quest into the dev machine, run
+   tools/quest_usb.sh (adb reverse) and open http://localhost:8000 (a secure context).
    Done when: the cube floats over greyscale passthrough. (If immersive-ar is unsupported,
    switch to immersive-vr with a room replica and tell the team.)
 3. Mock data: until Role 2's server is up, use a local JS mock (one person walking a loop).
@@ -48,8 +50,9 @@
 7. Stretch: keep predictions from crossing walls; MediaPipe 3D keypoints in the world frame.
 
 ## Role 3 — Cameras, hardware, lead (calib/, edge/, config/, tools/, docs/)
-1. Network: travel router, all devices joined, re-run tools/make_certs.sh, write
-   config/server.json with Mac-1's LAN IP. Done when: every device opens https://<mac1>:8000.
+1. Run tools/net_check.py on venue Wi-Fi. If it fails, set up the phone hotspot, join all
+   devices, run make_certs.sh, update config/server.json. Have tools/tunnel.sh tested as backup.
+   Done when: net_check passes from Mac-2, the Quest browser and the UNO Q.
 2. Cameras: run tools/list_cameras.py on each machine. Choose cam A (Mac-1 USB), cam B
    (UNO Q USB, behind the wall), cam C (Mac-2). calib/capture.py: open a camera by NAME
    (matching resolution/order from config), timestamped frames, auto-reconnect.

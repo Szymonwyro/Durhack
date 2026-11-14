@@ -19,7 +19,7 @@ The source of truth is [CLAUDE.md](../CLAUDE.md), which covers the project, hard
 Sleep in shifts, and keep at least one person who knows the server awake at all times.
 
 ## Checklist
-- [ ] Travel router up, all devices joined
+- [ ] `tools/net_check.py` run on venue Wi-Fi; if it fails, phone hotspot up and all devices joined
 - [ ] `tools/make_certs.sh` re-run on that network; `config/server.json` written; every device opens `https://<mac1>:8000`
 - [ ] Printed markers + chessboard; scale bars measured at 100 mm
 - [ ] Corner of the room secured with the organisers
@@ -35,7 +35,8 @@ Sleep in shifts, and keep at least one person who knows the server awake at all 
 | Quest passthrough fails | Quest shows a VR replica of the room; a phone becomes the AR viewer |
 | UNO Q too slow for detection (<2 fps) | It streams frames to Mac-1 for detection and keeps the PIR + LEDs |
 | ID swaps between people | Demo with one person in a bright top |
-| Laggy streams | USB cameras + our own travel router |
+| Venue Wi-Fi blocks device-to-device traffic | Phone hotspot (≈5 devices; keep it charging) → `tools/tunnel.sh` |
+| Laggy streams | USB cameras; send detections, not video, over the network |
 | Alignment drift on the Quest | "Re-align" button; bigger markers |
 
 ## Pitch framing

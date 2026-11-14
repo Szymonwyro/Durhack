@@ -23,6 +23,9 @@ python tools/lan_ip.py         # IP for phones
 python tools/list_cameras.py   # camera indices 0-5
 python tools/test_yolo.py      # yolo11n on camera 0 (or a sample image)
 python tools/test_aruco.py 0 30  # print marker IDs seen by cam 0 for 30 s
+python tools/net_check.py https://<ip>:8000  # DNS / TCP / GET /world / WS /tracks
+tools/tunnel.sh                # fallback: public cloudflared URL -> config/server.json
+tools/quest_usb.sh             # Quest over USB: adb reverse -> http://localhost:8000
 ```
 On macOS, grant camera access to your terminal app first: **System Settings → Privacy & Security → Camera**. Then restart the terminal.
 
@@ -40,7 +43,7 @@ uvicorn fusion.server:app --host 0.0.0.0 --port 8000 \
   --ssl-keyfile certs/key.pem --ssl-certfile certs/cert.pem
 #  (or certs/selfsigned-key.pem / certs/selfsigned.pem)
 ```
-Phones open `https://<LAN_IP>:8000/` (from `tools/lan_ip.py`). Phone and laptop must be on the same network. Venue Wi-Fi often isolates clients, so use the travel router.
+Phones open `https://<LAN_IP>:8000/` (from `tools/lan_ip.py`). Phone and laptop must be on the same network. Venue Wi-Fi often blocks device-to-device traffic, so check it with `tools/net_check.py`. If it fails, use a phone hotspot, or `tools/tunnel.sh` as a fallback. See the Networking section in CLAUDE.md.
 
 Accepting the cert:
 - **Self-signed, Android/Chrome:** "Your connection is not private" → Advanced → Proceed.
@@ -75,7 +78,8 @@ printables/  PDFs     weights/  recordings/  certs/  (git-ignored except printab
 - [ ] Long USB cables
 - [ ] 3-4 USB webcams or spare phones + clamps/tripods
 - [ ] Viewer phone
-- [ ] Travel router
+- [ ] Phone for the hotspot + its charging cable
+- [ ] USB-C data cable for the Quest (adb)
 - [ ] Gaffer tape
 - [ ] Tape measure
 - [ ] Printed markers + chessboard (scale verified)

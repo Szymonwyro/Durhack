@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Regenerate HTTPS certs for localhost + current LAN IP into certs/.
-# Re-run at the venue: the LAN IP changes per network.
+# Regenerate HTTPS certs for localhost + this machine's current LAN IP into certs/.
+#
+# RE-RUN THIS WHENEVER THE NETWORK CHANGES (new hotspot, hotspot restarted, venue Wi-Fi):
+# the LAN IP changes, and a cert for the old IP fails on phones and the Quest.
+# Afterwards, update lan_url in config/server.json. Not needed for tools/tunnel.sh
+# (valid public cert) or tools/quest_usb.sh (localhost).
+# Usage: tools/make_certs.sh [--help]
 set -euo pipefail
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
 cd "$(dirname "$0")/.."
 IP=$(.venv/bin/python tools/lan_ip.py | head -1)
 mkdir -p certs
@@ -17,3 +23,4 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 397 \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:$IP" \
   -addext "extendedKeyUsage=serverAuth" -addext "basicConstraints=critical,CA:FALSE" 2>/dev/null
 echo "self-signed: certs/selfsigned.pem certs/selfsigned-key.pem  for https://$IP:8000"
+echo "Next: set \"lan_url\": \"https://$IP:8000\" in config/server.json. Re-run this script whenever the hotspot/network changes."
