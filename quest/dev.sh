@@ -9,7 +9,7 @@
 #                               (needs a network without client isolation, e.g. an iPhone hotspot)
 #   ./quest/dev.sh --untethered [fusion-ws-url]
 #                               Wi-Fi, no cable: bridge also on https://<mac-ip>:8443 (self-signed, quest/.certs/),
-#                               live feed from the fusion server (default: the "IP :" line in README.md) via
+#                               live feed from the fusion server (default: first ws://<ip>:<port>/tracks in README.md) via
 #                               tools/fusion_to_quest.py, everything in restart loops. Route A = Quest -> Mac over
 #                               the venue Wi-Fi; falls back to Route B = cloudflared quick tunnel. Prints URL + QR.
 #   ./quest/dev.sh stop         kill server / replay / feed / tunnel / keeper, remove adb reverse/forward rules
@@ -68,8 +68,7 @@ if [ "${1:-}" = "--untethered" ]; then
   [ -z "$MAC" ] && { echo "This Mac has no Wi-Fi IPv4 address."; exit 1; }
   FUSION="${2:-}"
   if [ -z "$FUSION" ]; then
-    IPLINE=$(grep -m1 -E '^IP *: *http://' README.md | sed -E 's/^IP *: *http:\/\/([^/]+).*/\1/')
-    [ -n "$IPLINE" ] && FUSION="ws://$IPLINE/tracks"
+    FUSION=$(grep -m1 -oE 'ws://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/tracks' README.md)  # README "Live server"
   fi
   echo "Mac Wi-Fi: $MAC   fusion server: ${FUSION:-none (no live feed)}"
   USB=$(usb_serial)
