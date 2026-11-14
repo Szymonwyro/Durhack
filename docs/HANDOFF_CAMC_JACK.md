@@ -25,8 +25,8 @@ macOS: allow the terminal to use the camera (System Settings → Privacy & Secur
 ```bash
 .venv/bin/python -m calib.position camC
 ```
-It shows **every camera side by side**, each labelled with its number. Note the one for camC, then press Q.
-(It stops with "no lens calibration" after the picker on the first run. That's expected, and step 3 fixes it.)
+It shows **every camera side by side**, each labelled with its number: press the number of camC's camera.
+On a new camera it then stops and prints the exact step-3 command with that number filled in. That's expected.
 If it's an **iPhone via Continuity Camera:** it must be Jack's own iPhone (same Apple ID as the Mac). Mount it in
 landscape, locked and charging. In Control Centre → **Video Effects**, turn **off Center Stage**, Portrait, Studio
 Light and Reactions (Center Stage crops and pans the image, which breaks calibration). Use the 1x lens and never zoom.
