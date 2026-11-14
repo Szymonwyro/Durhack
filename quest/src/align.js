@@ -1,11 +1,11 @@
 // Align the map to the room: press A (right controller), then pull the trigger with the controller tip
-// on each ALIGN_POINT in order (point 1 = corner marker ID 1 centre = map 0,0).
+// on each ALIGN_POINT in order, touching the floor (point 1 = corner marker ID 1 centre = map 0,0).
 // Solves a 2D rigid transform (least squares, >= 2 points) -> mapRoot yaw about Y + position (floor offset).
 import * as THREE from 'three';
-import { ALIGN_POINTS } from './config.js';
+import { ALIGN_POINTS, ALIGN_MAX_TIP_HEIGHT_M, ALIGN_WARN_RMS_M } from './config.js';
 import { mapRoot } from './frames.js';
 
-const KEY = 'quest-align-v1';
+const KEY = 'quest-align-v2'; // v1 entries could be taken off the floor; ignore them
 const BTN_TRIGGER = 0, BTN_A = 4; // xr-standard gamepad mapping on Quest Touch
 
 let state = 'none';   // none | saved | ok | aligning | lost
@@ -13,6 +13,7 @@ let samples = [];
 let rmsM = null;
 let right = null;      // { ctrl, source }
 const prev = { a: false, trig: false };
+let rejectUntil = 0;   // show the 'touch the floor' warning until this time (ms)
 
 // small sphere at the controller's target-ray origin = the point we sample
 const tip = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff8c00 }));
@@ -55,7 +56,7 @@ function solve(m, w) {
 }
 
 function finish() {
-  const m = ALIGN_POINTS;
+  const m = ALIGN_POINTS.map((ap) => ap.pos);
   const w = samples.map((p) => [p.x, -p.z]);
   const { theta, t, rms } = solve(m, w);
   const floorY = samples.reduce((s, p) => s + p.y, 0) / samples.length;
@@ -64,7 +65,7 @@ function finish() {
   rmsM = rms;
   try { localStorage.setItem(KEY, JSON.stringify(a)); } catch { /* ignore */ }
   state = 'ok';
-  console.log('[align] solved', a);
+  console.log('[align] solved', JSON.stringify(a));
 }
 
 export function initAlign(renderer, scene) {
@@ -90,8 +91,13 @@ export function updateAlign() {
   if (trig && !prev.trig && state === 'aligning') {
     const p = new THREE.Vector3();
     right.ctrl.getWorldPosition(p);
-    samples.push(p);
-    console.log('[align] point', samples.length, p.toArray().map((x) => x.toFixed(3)));
+    console.log('[align] sample', samples.length + 1, JSON.stringify(p.toArray().map((x) => +x.toFixed(3))));
+    if (p.y > ALIGN_MAX_TIP_HEIGHT_M) {      // not on the floor: reject, ask again
+      rejectUntil = performance.now() + 2500;
+      console.warn(`[align] rejected: tip ${p.y.toFixed(2)} m above floor`);
+    } else {
+      samples.push(p);
+    }
     if (samples.length === ALIGN_POINTS.length) finish();
   }
   prev.a = a; prev.trig = trig;
@@ -100,13 +106,18 @@ export function updateAlign() {
 export function alignStatus() {
   const err = rmsM != null ? ` (err ${(rmsM * 100).toFixed(1)} cm)` : '';
   switch (state) {
-    case 'ok': return { text: 'aligned' + err };
+    case 'ok': return rmsM > ALIGN_WARN_RMS_M
+      ? { text: 'aligned' + err, warn: `Aligned but error ${(rmsM * 100).toFixed(0)} cm - press A to redo` }
+      : { text: 'aligned' + err };
     case 'saved': return { text: 'loaded from storage' + err };
     case 'lost': return { text: 'LOST', warn: 'ALIGNMENT LOST - press A to re-align' };
     case 'aligning': {
-      const i = samples.length, [x, y] = ALIGN_POINTS[i];
-      const name = i === 0 ? 'marker 1 (origin)' : `point ${i + 1} (${x}, ${y})`;
-      return { text: `aligning ${i}/${ALIGN_POINTS.length}`, prompt: `Tip on ${name}, pull trigger` };
+      const i = samples.length, ap = ALIGN_POINTS[i];
+      const warn = performance.now() < rejectUntil ? 'Too high - touch the FLOOR with the controller tip' : '';
+      return {
+        text: `aligning ${i}/${ALIGN_POINTS.length}`, warn,
+        prompt: `Touch marker ${ap.marker} centre on the floor, pull trigger`,
+      };
     }
     default: return { text: 'not aligned', prompt: right ? 'Press A to align' : '' };
   }

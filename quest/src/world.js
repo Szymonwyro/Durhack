@@ -43,7 +43,7 @@ export function buildWorld(world) {
 
   // alignment points (skip the origin, already drawn)
   const p = [];
-  for (const xy of ALIGN_POINTS) if (xy[0] || xy[1]) crossPoints(xy, 0.12, p);
+  for (const { pos } of ALIGN_POINTS) if (pos[0] || pos[1]) crossPoints(pos, 0.12, p);
   if (p.length) group.add(lines(p, COLORS.alignPoint));
 
   // cameras: a short view direction + field-of-view edges at camera height

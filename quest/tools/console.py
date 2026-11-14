@@ -40,6 +40,12 @@ def find_tab():
 def fmt_arg(a):
     if "value" in a:
         return a["value"] if isinstance(a["value"], str) else json.dumps(a["value"])
+    pv = a.get("preview")  # objects/arrays: show their (shallow) contents, not just "Object"
+    if pv and "properties" in pv:
+        items = [p.get("value", "?") if pv.get("subtype") == "array" else f'{p["name"]}: {p.get("value", "?")}'
+                 for p in pv["properties"]]
+        more = ", …" if pv.get("overflow") else ""
+        return ("[" + ", ".join(items) + more + "]") if pv.get("subtype") == "array" else ("{" + ", ".join(items) + more + "}")
     return a.get("description") or a.get("unserializableValue") or a.get("type", "?")
 
 

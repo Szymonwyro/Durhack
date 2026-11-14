@@ -5,9 +5,15 @@ const q = new URLSearchParams(location.search);
 export const MOCK = q.get('mock') === '1';
 export const DEBUG = q.get('debug') === '1';
 
-// Alignment points in MAP coords (metres, x,y on the floor). Point 1 = corner marker ID 1 = origin.
-// Default point 2 = marker ID 3 (config/markers.json). Add [1.5,1.5] (ID 5) / [0,1.5] (ID 7) for a better fit.
-export const ALIGN_POINTS = [[0.0, 0.0], [1.5, 0.0]];
+// Markers the wearer touches to align, map coords of their CENTRES (shape = INTERFACE.md align_points).
+// Layout from config/markers.json: ID 1 = origin, ID 7 = (1.5,0), ID 3 = (1.5,1.5), ID 5 = (0,1.5).
+// Add {marker:3,...} for a 3-point fit (and the 2.12 m diagonal).
+export const ALIGN_POINTS = [
+  { id: 'm1', marker: 1, pos: [0.0, 0.0] },
+  { id: 'm7', marker: 7, pos: [1.5, 0.0] },
+];
+export const ALIGN_MAX_TIP_HEIGHT_M = 0.25; // reject samples not taken on the floor
+export const ALIGN_WARN_RMS_M = 0.08;
 
 // Quest passthrough is greyscale: bright colours only.
 export const COLORS = {
