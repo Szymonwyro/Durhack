@@ -1,0 +1,13 @@
+{
+  "_note": "Camera calibration-refresh + connection settings (calib/refresh.py, tools/camera_worker.py, fusion/server.py). pixel_tol / reproj_thresh are loose until the marker square is re-measured (spec: 5 / 2.0).",
+  "refresh_s": 60,
+  "excluded_retry_s": 5,
+  "verify_retry_s": 2,
+  "pixel_tol": 8,
+  "reproj_thresh": 4.5,
+  "degraded_weight": 0.4,
+  "stale_timeout": 2.5,
+  "pose_eps_m": 0.01,
+  "pose_eps_deg": 0.5,
+  "reacquire_gate_max_m": 3.0
+}
