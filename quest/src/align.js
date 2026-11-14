@@ -4,9 +4,10 @@
 //   review -> "Aligned · error 3 cm", per-marker errors; > 8 cm: "Marker N is 11 cm off · B to redo it"; A = accept
 //   redo   -> re-touch one marker (B = cancel)
 //   aligned (saved per world_version) | lost (reference-space reset: "press A to recalibrate")
-// Hold A for 2 s at any time to restart. Fit: least-squares 2D rigid transform (yaw + x/y offset).
+// Hold A + B together for 1 s at any time to recalibrate (B tap while aligned = toggle minimap).
+// Fit: least-squares 2D rigid transform (yaw + x/y offset).
 import * as THREE from 'three';
-import { FALLBACK_ALIGN_POINTS, ALIGN_MAX_TIP_HEIGHT_M, ALIGN_WARN_M, HOLD_RESTART_S, COLORS } from './config.js';
+import { FALLBACK_ALIGN_POINTS, ALIGN_MAX_TIP_HEIGHT_M, ALIGN_WARN_M, COMBO_HOLD_S, COLORS } from './config.js';
 import { mapRoot } from './frames.js';
 import { CalibPanel } from './calibpanel.js';
 
@@ -22,7 +23,9 @@ let next = 0, redoIdx = -1;
 let fit = null;     // { theta, x, z, rms, errs[] }
 let right = null;   // { ctrl, source }
 const prev = { a: false, b: false, trig: false };
-let aDownAt = null, holdFired = false;
+let comboSince = null, comboFired = false, comboTick = 0, bCombo = false;
+let onToggleMinimap = () => {};
+export function setMinimapToggle(fn) { onToggleMinimap = fn; }
 let note = '', noteUntil = 0;
 let panel = null;
 
@@ -186,7 +189,11 @@ export function initAlign(renderer, scene, camera) {
   });
 }
 
-function panelInfo() {
+function panelInfo(nowS) {
+  if (comboSince !== null && !comboFired) {   // holding A + B
+    const f = Math.min(1, (nowS - comboSince) / COMBO_HOLD_S), n = Math.round(f * 10);
+    return { visible: true, title: 'Recalibrate?', lines: ['Keep holding A + B', '#'.repeat(n) + '-'.repeat(10 - n)], points: [] };
+  }
   const base = {
     visible: true,
     points: points.map((p) => p.pos),
@@ -223,13 +230,24 @@ export function updateAlign(nowS, presenting) {
   if (right && presenting) {
     const b = right.source.gamepad.buttons, pressed = (i) => !!(b[i] && b[i].pressed);
     const a = pressed(BTN_A), bb = pressed(BTN_B), trig = pressed(BTN_TRIGGER);
-    if (a && !prev.a) { aDownAt = nowS; holdFired = false; onA(); }
-    if (a && !holdFired && aDownAt !== null && nowS - aDownAt >= HOLD_RESTART_S) { holdFired = true; startCalib(); pulse(0.8, 150); }
-    if (!a) aDownAt = null;
-    if (bb && !prev.b) onB();
+    if (a && bb) {                                   // A + B combo: recalibrate after COMBO_HOLD_S
+      if (comboSince === null) { comboSince = nowS; comboFired = false; comboTick = 0; }
+      bCombo = true;
+      const held = nowS - comboSince;
+      if (!comboFired && held >= COMBO_HOLD_S) { comboFired = true; startCalib(); pulse(0.9, 150); }
+      else if (!comboFired && held > (comboTick + 1) * 0.25) { comboTick++; pulse(0.15, 15); }
+    } else {
+      comboSince = null;
+    }
+    if (a && !prev.a && !bb) onA();
+    if (bb && !prev.b && !a) { if (state !== 'aligned') onB(); bCombo = false; }
+    if (!bb && prev.b) {                             // B released: a plain tap while aligned toggles the minimap
+      if (state === 'aligned' && !bCombo && !a) onToggleMinimap();
+      bCombo = false;
+    }
     if (trig && !prev.trig) onTrigger();
     prev.a = a; prev.b = bb; prev.trig = trig;
   }
   tip.visible = state !== 'aligned';
-  panel.update(presenting ? panelInfo() : { visible: false });
+  panel.update(presenting ? panelInfo(nowS) : { visible: false });
 }

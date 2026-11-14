@@ -16,7 +16,7 @@ export const FALLBACK_ALIGN_POINTS = [
 ];
 export const ALIGN_MAX_TIP_HEIGHT_M = 0.3; // a sample higher than this wasn't taken on the floor
 export const ALIGN_WARN_M = 0.08;          // per-marker error that triggers "B to redo it"
-export const HOLD_RESTART_S = 2.0;         // hold A this long to restart calibration
+export const COMBO_HOLD_S = 1.0;           // hold A + B together this long to recalibrate (any time)
 
 // Quest passthrough is greyscale: bright colours only.
 export const COLORS = {
