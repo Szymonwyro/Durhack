@@ -6,6 +6,8 @@ round-trip time on the receiving device.
 
   serve:  python tools/stream_test.py serve [--source 1] [--width 1280] [--quality 80] [--port 8090]
           (falls back to synthetic frames if the camera can't be opened)
+  camera: python tools/stream_test.py serve --source 0 --raw --quality 90
+          -> use http://<ip>:8090/stream.mjpg as the camera "source" on Mac-1 (live_map, calib)
   recv:   python tools/stream_test.py recv http://<ip>:8090 [--seconds 10]   (e.g. from Mac-2 / UNO Q)
   phone:  open http://<ip>:8090/ in iPhone Safari or the Quest browser; the page shows live stats.
 
@@ -57,11 +59,11 @@ loop();
 class Source:
     """Grabs frames in a background thread; keeps only the latest JPEG."""
 
-    def __init__(self, src, width, quality):
+    def __init__(self, src, width, quality, raw=False):
         import cv2
         import numpy as np
         self.cv2, self.np = cv2, np
-        self.width, self.quality = width, quality
+        self.width, self.quality, self.raw = width, quality, raw
         self.jpg, self.seq, self.lock = None, 0, threading.Condition()
         self.cap = cv2.VideoCapture(src)
         ok = self.cap.isOpened() and self.cap.read()[0]
@@ -91,7 +93,8 @@ class Source:
             f = self._frame()
             if f.shape[1] != self.width:
                 f = cv2.resize(f, (self.width, f.shape[0] * self.width // f.shape[1]))
-            cv2.putText(f, f"{time.time():.3f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            if not self.raw:
+                cv2.putText(f, f"{time.time():.3f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             ok, buf = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, self.quality])
             if ok:
                 with self.lock:
@@ -105,7 +108,7 @@ class Source:
 
 
 def serve(args):
-    src = Source(args.source, args.width, args.quality)
+    src = Source(args.source, args.width, args.quality, args.raw)
     served = {"frames": 0, "bytes": 0}
 
     class H(BaseHTTPRequestHandler):
@@ -165,6 +168,7 @@ def serve(args):
     s.close()
     print(f"source: {src.kind}, {args.width}px, JPEG q{args.quality}, ~{len(src.jpg) / 1024:.0f} KB/frame", flush=True)
     print(f"open on another device:  http://{ip}:{args.port}/      (Ctrl+C to stop)", flush=True)
+    print(f"as a camera source (cameras.json / --source):  http://{ip}:{args.port}/stream.mjpg", flush=True)
     ThreadingHTTPServer(("0.0.0.0", args.port), H).serve_forever()
 
 
@@ -210,6 +214,8 @@ def main():
     s.add_argument("--width", type=int, default=1280)
     s.add_argument("--quality", type=int, default=80)
     s.add_argument("--port", type=int, default=8090)
+    s.add_argument("--raw", action="store_true",
+                   help="no timestamp overlay: use when the stream is a real camera source (detection/calibration)")
     r = sub.add_parser("recv")
     r.add_argument("url")
     r.add_argument("--seconds", type=float, default=10)
