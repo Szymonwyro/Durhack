@@ -74,6 +74,11 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 - **Windows laptop / camB (Worker 2):** follow docs/HANDOFF_CAMB_WINDOWS.md to push the USB camera to
   Mac-1's relay (`tools/stream_test.py push http://10.247.46.145:8095 --cam camB --source <N>`).
 
+- **Test data without cameras (Role 1/2):** samples/test_walk_camA.jsonl = 60 s of one person (Szymon) walking in
+  and out of the 1.5 m square, seen by camA, as contract detection messages in world metres. Replay it into any
+  server's WS /ingest at real pace, looping: `python3 tools/test_walk.py replay [--url ws://127.0.0.1:8001/ingest]`
+  (e.g. into `quest/tools/bridge.py`, which turns it into /tracks). `--print` just prints it.
+
 ## Device roles
 | Device | Runs |
 |---|---|
