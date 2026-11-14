@@ -62,6 +62,7 @@ class Track:
     def __init__(self, pos, t, cam):
         self.id = None              # assigned when confirmed (CONFIRM_HITS), so blips don't use up ids
         self.hits = 1
+        self.lost = False           # every camera that saw it went OFFLINE/EXCLUDED -> predicted until seen again
         self.x = np.array([pos[0], pos[1], 0.0, 0.0])
         self.P = np.diag([NEW_TRACK_SIGMA ** 2] * 2 + [1.0] * 2)
         self.t = t                  # time of the state estimate
@@ -116,6 +117,7 @@ class Track:
         self.last_recv = max(self.last_recv, recv if recv is not None else t)
         self.pos_at_last_seen = self.x[:2].copy()
         self.seen[cam] = t
+        self.lost = False
         self.hits += 1
         if self.id is None and self.hits >= CONFIRM_HITS:
             self.id = next(_ids)
@@ -217,6 +219,21 @@ class Tracker:
                 tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now)
                 self.tracks_.append(tr)
 
+    def drop_camera(self, cam, now):
+        """A camera went OFFLINE/EXCLUDED: forget its contributions. Tracks only it was seeing behave like a person
+        who went missing (last position kept, predicted, uncertainty grows, skeleton frozen, dropped on the usual
+        timeout); tracks other cameras see carry on unchanged."""
+        keep = []
+        for tr in self.tracks_:
+            tr.seen.pop(cam, None)
+            tr.skel_by_cam.pop(cam, None)
+            if tr.id is None and not tr.seen:
+                continue  # an unconfirmed blip from that camera only
+            if not any(now - t <= PREDICT_AFTER_S for t in tr.seen.values()):
+                tr.lost = True
+            keep.append(tr)
+        self.tracks_ = keep
+
     def tracks(self, now):
         out, keep = [], []
         # older confirmed tracks first: when two overlap, the older id survives
@@ -229,7 +246,7 @@ class Tracker:
                 if unseen <= TENTATIVE_DROP_S:
                     keep.append(tr)
                 continue
-            predicted = unseen > PREDICT_AFTER_S
+            predicted = unseen > PREDICT_AFTER_S or tr.lost
             if not predicted and any(math.dist(pos, v) < MERGE_M for v in visible_pos):
                 continue  # duplicate of an older visible track
             if predicted and (unseen > DROP_PREDICTED_S + PREDICT_AFTER_S

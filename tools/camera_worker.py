@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 
 from calib.auto_pose import AutoPose
+from calib.refresh import DEFAULTS, load_thresholds
 from calib.config_io import get_camera, parse_source
 from perception.detect import FrameDetections, detect_video
 from perception.skeleton import BONES, JOINT_MIN_CONF, lift_keypoints
@@ -90,6 +91,7 @@ def make_message(
     frame: np.ndarray,
     result: FrameDetections,
     pose: dict[str, Any] | None = None,
+    banner: tuple[str, float] | None = None,
 ) -> dict[str, Any]:
     annotated = frame.copy()
     world_detections = []
@@ -125,6 +127,11 @@ def make_message(
                 flush=True,
             )
 
+    if banner is not None:  # camera state on the preview, so the map's feed shows it too
+        state, weight = banner
+        cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 34), STATE_COLOURS.get(state, (128, 128, 128)), -1)
+        cv2.putText(annotated, f"{camera_id} {state} w={weight:.1f}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                    (0, 0, 0), 2)
     scale = min(1.0, MAX_PREVIEW_WIDTH / annotated.shape[1])
     if scale < 1:
         annotated = cv2.resize(
@@ -163,30 +170,39 @@ class ServerClock:
         self.offset = min(self.samples)[1]
 
 
-async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -> None:
+STATE_COLOURS = {"TRUSTED": (60, 200, 60), "DEGRADED": (0, 190, 255), "EXCLUDED": (0, 120, 255), "OFFLINE": (128, 128, 128)}
+
+
+def offline_status(camera_id: str, reason: str) -> dict[str, Any]:
+    return {"type": "status", "cam": camera_id, "t": time.time(), "state": "OFFLINE", "weight": 0.0,
+            "reasons": [reason]}
+
+
+async def publish(camera_id: str, source: str | int, args: argparse.Namespace, auto: AutoPose | None,
+                  th: dict[str, Any]) -> str:
+    """One camera session: open the camera, stream until it stops, return why. The caller reconnects.
+    Hard disconnect: no new frames for > stale_timeout (or the stream ends) -> final OFFLINE status, release the
+    camera, close the socket. EXCLUDED -> keep the camera and refresh, send heartbeats + preview, no detections."""
     import websockets
 
     calibration, _ = load_camera(camera_id, str(source))
     config = get_camera(camera_id)
     size = (config.get("width"), config.get("height"))
     warned = []
-    auto = None
-    if args.pose_interval > 0:
-        saved = ({"R": calibration["R"], "t": calibration["t"], "pos": config.get("pos")}
-                 if calibration["R"] is not None and config.get("pos") else None)
-        auto = AutoPose(camera_id, calibration["K"], calibration["dist"], interval_s=args.pose_interval,
-                        log=lambda text: print(text, flush=True), initial=saved)
-        print(f"[{camera_id}] auto-pose on: calibrating position from the corner markers now, then every "
-              f"{args.pose_interval:.0f} s" + (" (saved position used meanwhile)" if saved else
-                                                " (no detections sent until it has one)"), flush=True)
+    if auto is not None:
+        auto.reconnected()
+        if auto.pose is not None:
+            calibration["R"], calibration["t"] = auto.pose["R"], auto.pose["t"]
     elif calibration["R"] is None:
-        raise ValueError(f"Camera {camera_id!r} has no saved position (R, t); run with --pose-interval > 0")
+        raise ValueError(f"Camera {camera_id!r} has no saved position (R, t); run with --refresh-s > 0")
     outbound: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
     clock = ServerClock()
     stop = threading.Event()
     finished = threading.Event()
     failure: list[BaseException] = []
     loop = asyncio.get_running_loop()
+    last_frame = [0.0]       # monotonic time of the latest camera frame
+    last_heartbeat = [0.0]
 
     def put_latest(message: dict[str, Any]) -> None:
         try:
@@ -201,6 +217,8 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
     pose_stats = PoseStats(camera_id) if args.pose else None
 
     def on_frame(frame: np.ndarray, result: FrameDetections) -> bool:
+        now = time.monotonic()
+        last_frame[0] = now
         if not warned and size[0] and (frame.shape[1], frame.shape[0]) != size:
             warned.append(True)
             print(f"[{camera_id}] WARNING: camera gives {frame.shape[1]}x{frame.shape[0]} but it was calibrated at "
@@ -210,11 +228,21 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
             warned.append(True)
             print(f"[{camera_id}] camera OK at {frame.shape[1]}x{frame.shape[0]}, sending detections", flush=True)
         if auto is not None:
-            update = auto.feed(frame)
-            if update:
-                calibration["R"], calibration["t"] = update["R"], update["t"]
-        pose = auto.pose if auto is not None else None
-        message = make_message(camera_id, calibration, frame, result, pose)
+            if auto.feed(frame):
+                calibration["R"], calibration["t"] = auto.pose["R"], auto.pose["t"]
+            state, weight, reasons = auto.state, auto.weight, auto.reasons
+            if state == "OFFLINE":  # first frames after (re)connect, before the first check finishes
+                state, weight, reasons = "DEGRADED", float(th["degraded_weight"]), ["checking markers"]
+        else:
+            state, weight, reasons = "TRUSTED", 1.0, ["auto-refresh off"]
+        if state not in ("TRUSTED", "DEGRADED"):  # EXCLUDED: heartbeat + preview ~2 Hz, no detections
+            if now - last_heartbeat[0] < 0.5:
+                return not stop.is_set()
+            last_heartbeat[0] = now
+            result = {**result, "detections": []}
+        message = make_message(camera_id, calibration, frame, result, auto.pose if auto is not None else None,
+                               banner=(state, weight))
+        message.update(state=state, weight=round(weight, 3), reasons=list(reasons)[-2:])
         if pose_stats is not None:
             pose_stats.add(message)
         loop.call_soon_threadsafe(put_latest, message)
@@ -237,51 +265,62 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
         except BaseException as error:
             failure.append(error)
         finally:
-            finished.set()
+            finished.set()  # detect_video releases the capture on exit
 
-    while True:
-        try:
-            async with websockets.connect(args.server, max_size=2_000_000) as websocket:
-                print(f"[{camera_id}] connected to fusion server {args.server}", flush=True)
-                thread = threading.Thread(target=detect_camera, name=f"camera-{camera_id}", daemon=True)
-                thread.start()
+    stale = float(th["stale_timeout"])
+    try:
+        async with websockets.connect(args.server, max_size=2_000_000) as websocket:
+            print(f"[{camera_id}] connected to fusion server {args.server}", flush=True)
+            thread = threading.Thread(target=detect_camera, name=f"camera-{camera_id}", daemon=True)
+            thread.start()
+            first_frame_deadline = time.monotonic() + 20  # opening the camera + loading the model
+            reason = ""
+            try:
+                while True:
+                    if failure:
+                        reason = f"camera detection failed: {failure[0]}"
+                        break
+                    if finished.is_set() and outbound.empty():
+                        reason = "camera stream ended (unplugged / USB hiccup)"
+                        break
+                    now = time.monotonic()
+                    if last_frame[0] == 0.0 and now > first_frame_deadline:
+                        reason = "no frames from the camera"
+                        break
+                    if last_frame[0] and now - last_frame[0] > stale:
+                        reason = f"no new frames for {now - last_frame[0]:.1f} s"
+                        break
+                    try:
+                        message = await asyncio.to_thread(outbound.get, True, 0.25)
+                    except queue.Empty:
+                        continue
+                    if clock.offset is not None:  # capture time on the SERVER's clock (laptop clocks differ)
+                        message["t_server"] = message["t"] + clock.offset
+                    sent = time.time()
+                    await websocket.send(json.dumps(message, separators=(",", ":")))
+                    response = json.loads(await websocket.recv())
+                    clock.sample(sent, time.time(), response.get("server_t"))
+                    if response.get("ok") is not True:
+                        raise RuntimeError(f"fusion server rejected frame {message.get('frame')}: "
+                                           f"{response.get('error', 'unknown error')}")
+                # hard disconnect: tell the server, then release the camera and close the socket
+                if auto is not None:
+                    auto.set_offline(reason)
+                print(f"[{camera_id}] OFFLINE: {reason}", flush=True)
                 try:
-                    while not finished.is_set() or not outbound.empty():
-                        if failure:
-                            raise RuntimeError(f"camera detection failed: {failure[0]}") from failure[0]
-                        try:
-                            message = await asyncio.to_thread(outbound.get, True, 1)
-                        except queue.Empty:
-                            continue
-                        if clock.offset is not None:  # capture time on the SERVER's clock (laptop clocks differ)
-                            message["t_server"] = message["t"] + clock.offset
-                        sent = time.time()
-                        await websocket.send(json.dumps(message, separators=(",", ":")))
-                        response = json.loads(await websocket.recv())
-                        clock.sample(sent, time.time(), response.get("server_t"))
-                        if response.get("ok") is not True:
-                            raise RuntimeError(
-                                f"fusion server rejected frame {message['frame']}: "
-                                f"{response.get('error', 'unknown error')}"
-                            )
-                finally:
-                    stop.set()
-                    await asyncio.to_thread(thread.join, 3)
-                if failure:
-                    raise RuntimeError(f"camera detection failed: {failure[0]}") from failure[0]
-                return
-        except (OSError, websockets.WebSocketException) as error:
-            stop.set()
-            print(f"[{camera_id}] server connection failed ({error}); retrying in 2 seconds", flush=True)
-            await asyncio.sleep(2)
-            stop.clear()
-            finished.clear()
-            failure.clear()
-            while not outbound.empty():
-                try:
-                    outbound.get_nowait()
-                except queue.Empty:
-                    break
+                    await websocket.send(json.dumps(offline_status(camera_id, reason)))
+                    await asyncio.wait_for(websocket.recv(), 1.0)
+                except Exception:  # noqa: BLE001 - best effort
+                    pass
+                return reason
+            finally:
+                stop.set()
+                await asyncio.to_thread(thread.join, 3)
+    except (OSError, websockets.WebSocketException) as error:
+        stop.set()
+        if auto is not None:
+            auto.set_offline(f"server connection failed: {error}")
+        return f"server connection failed ({error})"
 
 
 def main() -> None:
@@ -301,13 +340,18 @@ def main() -> None:
     parser.add_argument("--confidence", type=float, default=0.25, help="Minimum confidence, 0 to 1")
     parser.add_argument("--classes", type=int, nargs="+", help="Optional YOLO class IDs, e.g. 0 for person")
     parser.add_argument("--device", help="Inference device, such as cpu, mps, or 0")
-    parser.add_argument(
-        "--pose-interval",
-        type=float,
-        default=60,
-        help="re-calibrate the camera position from the corner markers every N seconds (first at startup); "
-        "0 = use the saved position in config/cameras.json only",
-    )
+    parser.add_argument("--pose-interval", type=float, default=None, help="old name for --refresh-s")
+    # calibration refresh + connection (defaults: config/refresh.json; see calib/refresh.py)
+    for name, help_text in [("refresh_s", "seconds between marker checks while TRUSTED (0 = off: saved pose only)"),
+                            ("excluded_retry_s", "re-check interval while EXCLUDED"),
+                            ("verify_retry_s", "re-check interval while verifying after a reconnect"),
+                            ("pixel_tol", "marker counts as moved above this mean corner error (px)"),
+                            ("reproj_thresh", "accept a solve below this reprojection error (px)"),
+                            ("degraded_weight", "fusion weight while DEGRADED"),
+                            ("stale_timeout", "no new frames for this long -> OFFLINE (s)"),
+                            ("pose_eps_m", "ignore pose changes smaller than this (m)"),
+                            ("pose_eps_deg", "ignore pose changes smaller than this (deg)")]:
+        parser.add_argument("--" + name.replace("_", "-"), dest=name, type=float, default=None, help=help_text)
     parser.add_argument(
         "--pose",
         action="store_true",
@@ -322,21 +366,36 @@ def main() -> None:
     if not 0 <= args.confidence <= 1:
         parser.error("--confidence must be between 0 and 1")
 
-    _, source = load_camera(args.camera_id, args.source)
+    th = load_thresholds(**{k: getattr(args, k) for k in DEFAULTS if hasattr(args, k)})
+    if args.pose_interval is not None:  # old flag: same as --refresh-s
+        th["refresh_s"] = args.pose_interval
+    calibration, source = load_camera(args.camera_id, args.source)
+    config = get_camera(args.camera_id)
+    auto = None
+    if th["refresh_s"] > 0:  # one AutoPose for the whole run: its pose + state survive camera reconnects
+        saved = ({"R": calibration["R"], "t": calibration["t"], "pos": config.get("pos"), "yaw": config.get("yaw")}
+                 if calibration["R"] is not None else None)
+        auto = AutoPose(args.camera_id, calibration["K"], calibration["dist"], th,
+                        log=lambda text: print(text, flush=True), initial=saved)
+        print(f"[{args.camera_id}] calibration refresh on: check at (re)connect, then every {th['refresh_s']:.0f} s "
+              f"(EXCLUDED: {th['excluded_retry_s']:.0f} s); " + ("stored pose from config/cameras.json"
+              if saved else "no stored pose: EXCLUDED until a 4-marker solve"), flush=True)
     live = isinstance(source, int) or str(source).startswith(("http://", "https://", "rtsp://"))
+    backoff = 1.0
     try:
         while True:
+            started = time.monotonic()
             try:
-                asyncio.run(publish(args.camera_id, source, args))
-                reason = "camera stream ended (dropped frame / USB hiccup / unplugged)"
-            except RuntimeError as error:  # e.g. camera can't be opened right now
+                reason = asyncio.run(publish(args.camera_id, source, args, auto, th))
+            except RuntimeError as error:
                 reason = str(error)
             if not live:
                 break  # a video file: done
-            # a live camera: reopen instead of exiting. If it was unplugged and another camera took its index,
-            # the auto-pose jump guard keeps the old position until two matching 4-marker solves agree.
-            print(f"[{args.camera_id}] {reason}; reopening camera {source!r} in 2 s", flush=True)
-            time.sleep(2)
+            if time.monotonic() - started > 10:
+                backoff = 1.0  # it was running fine: reconnect quickly
+            print(f"[{args.camera_id}] {reason}; reconnecting camera {source!r} in {backoff:.0f} s", flush=True)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 5.0)
     except KeyboardInterrupt:
         print(f"\n[{args.camera_id}] stopped", flush=True)
 

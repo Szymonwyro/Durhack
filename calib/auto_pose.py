@@ -1,122 +1,130 @@
-"""Automatic camera position from the corner markers, inside a running camera worker.
+"""Camera calibration-refresh inside a running camera worker: pose + state (TRUSTED/DEGRADED/EXCLUDED) from the
+corner markers, decided by calib/refresh.py.
 
-    pose = AutoPose("camB", K, dist, interval_s=60)
+    auto = AutoPose("camB", K, dist, thresholds, initial=saved_pose)   # kept across camera reconnects
+    auto.reconnected()                    # call whenever the camera is (re)opened: next check uses the fast path
     for frame in frames:
-        update = pose.feed(frame)        # cheap except during a solve window (~15 frames every interval_s)
-        if update: calibration.update(update)   # {"R", "t", "pos", "yaw", "err", "ids"}
+        if auto.feed(frame): calibration.update(R=auto.pose["R"], t=auto.pose["t"])
+        auto.state, auto.weight           # TRUSTED 1.0 / DEGRADED degraded_weight / EXCLUDED 0
 
-It starts from the saved pose (config/cameras.json) if there is one, solves at startup, then every interval_s.
-Only a solve from ALL 4 corner markers updates the pose (subsets of 3 disagree by ~15 cm when a sheet is slightly
-off). A 2-3 marker solve is used only if the camera has no pose at all; otherwise it just checks whether the camera
-moved (> 5 cm / 2 deg -> logged: clear all 4 markers so it can re-solve).
-Nothing is written to config/cameras.json, so laptops don't fight in git. Use calib.position to save a pose.
+A check is due right after (re)connecting, then every refresh_s (TRUSTED), excluded_retry_s (EXCLUDED, DEGRADED after
+a poor solve) or verify_retry_s (reconnected with no markers in view). Each check uses a few fresh frames (median
+corners), projects each visible marker's known world corners with the CURRENT pose, optionally solves, and applies
+decide_refresh(). Nothing is written to config/cameras.json (use calib.position to save a pose).
 """
 import math
 import time
 
+import cv2
 import numpy as np
 
 from calib.config_io import load_markers
 from calib.extrinsics import detect, make_detector, marker_world_corners, solve
+from calib.refresh import DEGRADED, EXCLUDED, OFFLINE, decide_refresh, format_log, weight_for
 
-MAX_ERR_PX = 4.0
-MOVE_M, MOVE_DEG = 0.05, 2.0
-JUMP_M, JUMP_DEG = 0.5, 20.0  # bigger moves need two matching 4-marker solves in a row (unplugged / swapped camera)
-
-
-def _big(moved):
-    return moved[0] > MOVE_M or moved[1] > MOVE_DEG
+CHECK_FRAMES = 3      # fresh frames per check (median corners); small so the reconnect fast path stays ~1 s
 
 
 class AutoPose:
-    def __init__(self, cam_id, K, dist, interval_s=60.0, window=30, log=print, initial=None):
+    def __init__(self, cam_id, K, dist, thresholds, log=print, initial=None):
         self.cam_id, self.K, self.dist = cam_id, np.asarray(K, np.float64), np.asarray(dist, np.float64)
-        self.interval_s, self.window, self.log = interval_s, window, log
+        self.th, self.log = thresholds, log
         m = load_markers()
         self.world = {x["id"]: marker_world_corners(x, x.get("size_m", m["size_m"])) for x in m["markers"]}
         self.detector = make_detector(m.get("dictionary", "DICT_4X4_50"))
-        self.pose = None  # current pose dict; `initial` = saved pose {"R", "t", "pos"} (not counted as 'ready')
-        self.saved = initial
-        self.pending = None  # a big jump waiting for a second, matching solve
-        self.next_solve = 0.0
+        self.pose = None
+        if initial and initial.get("R") is not None:
+            self.pose = {"R": initial["R"], "t": initial["t"], "pos": initial.get("pos"), "yaw": initial.get("yaw"),
+                         "err": None, "ids": [], "time": None, "source": "saved"}
+        self.state, self.weight, self.reasons = OFFLINE, 0.0, ["not started"]
+        self.displaced = set()
+        self.context = "reconnect"
+        self.next_check = 0.0
         self.hist, self.frames = {}, 0
+        self.last_decision = None
 
-    @property
-    def ready(self):
-        return self.pose is not None
+    def reconnected(self):
+        """Camera (re)opened: check on the next frames with the reconnect fast path."""
+        self.context, self.next_check, self.hist, self.frames = "reconnect", 0.0, {}, 0
 
-    def _current(self):
-        return self.pose or self.saved
-
-    def _good(self, sol):
-        return (sol is not None and sol["pos"][2] > 0 and not sol["ambiguous"] and sol["err"] <= MAX_ERR_PX
-                and len(sol["ids"]) >= 2)
+    def set_offline(self, why):
+        self.state, self.weight, self.reasons = OFFLINE, 0.0, [why]
 
     def feed(self, frame):
-        """Returns a new pose dict when one is accepted, else None."""
+        """Returns True when the pose was replaced."""
         now = time.time()
-        if now < self.next_solve:
-            return None
+        if now < self.next_check:
+            return False
         for i, c in detect(self.detector, frame).items():
             if i in self.world:
                 self.hist.setdefault(i, []).append(c)
         self.frames += 1
-        if self.frames < self.window:
-            return None
-        avg = {i: np.median(np.stack(cs), axis=0) for i, cs in self.hist.items() if len(cs) >= self.window // 4}
-        sol = solve(avg, self.world, self.K, self.dist) if avg else None
+        if self.frames < CHECK_FRAMES:
+            return False
+        visible = {i: np.median(np.stack(cs), axis=0) for i, cs in self.hist.items() if len(cs) >= 2}
         self.hist, self.frames = {}, 0
-        if not self._good(sol):
-            why = "no corner markers seen" if sol is None else f"{sorted(sol['ids'])}, {sol['err']:.1f} px"
-            if self._current() is None:
-                self.log(f"[{self.cam_id}] auto-pose: waiting for a good view of the corner markers ({why})")
-                return None  # keep trying every window until the first good pose
-            self.log(f"[{self.cam_id}] auto-pose: check not good ({why}); keeping the "
-                     f"{'previous' if self.ready else 'saved'} pose")
-            self.next_solve = now + self._retry()
-            return None
-        moved = self._moved(sol) if self._current() else None
-        if len(sol["ids"]) < len(self.world) and moved is not None:
-            # partial view (people hiding markers): too noisy to update from, only used to spot a moved camera
-            if _big(moved):
-                self.log(f"[{self.cam_id}] auto-pose: only markers {sorted(sol['ids'])} visible; that pose is "
-                         f"{moved[0] * 100:.0f} cm / {moved[1]:.1f} deg off the current one. Keeping the current "
-                         f"pose. If the camera moved, clear all 4 corner markers so it can re-solve.")
-            self.next_solve = now + self._retry()
-            return None
-        if moved is not None and (moved[0] > JUMP_M or moved[1] > JUMP_DEG):
-            prev = self.pending
-            self.pending = {"R": sol["R"], "pos": sol["pos"]}
-            same = prev is not None and _big((float(np.linalg.norm(np.asarray(sol["pos"]) - np.asarray(prev["pos"]))),
-                                              math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(
-                                                  np.asarray(prev["R"]).T @ np.asarray(sol["R"])) - 1) / 2)))))) is False
-            if not same:
-                self.log(f"[{self.cam_id}] auto-pose: view jumped {moved[0] * 100:.0f} cm / {moved[1]:.0f} deg (camera "
-                         f"unplugged, swapped index, or moved?). Ignored unless the next check agrees.")
-                self.next_solve = now + min(self._retry(), 10.0)
-                return None
-        self.pending = None
-        was_ready = self.ready
-        self.pose = {"R": np.round(sol["R"], 6).tolist(), "t": np.round(sol["t"], 4).tolist(),
-                     "pos": np.round(sol["pos"], 3).tolist(), "yaw": round(sol["yaw"], 1),
-                     "err": round(sol["err"], 2), "ids": sorted(sol["ids"]), "time": now}
-        x, y, z = self.pose["pos"]
-        if moved is None or not was_ready:
-            self.log(f"[{self.cam_id}] auto-pose: calibrated from markers {self.pose['ids']}, {sol['err']:.1f} px, "
-                     f"camera at ({x:.2f}, {y:.2f}) h {z:.2f} m, yaw {sol['yaw']:.0f}")
-        elif _big(moved):
-            self.log(f"[{self.cam_id}] auto-pose: CAMERA MOVED {moved[0] * 100:.0f} cm / {moved[1]:.1f} deg; "
-                     f"updated to ({x:.2f}, {y:.2f}) h {z:.2f} m, {sol['err']:.1f} px")
-        self.next_solve = now + self.interval_s
-        return self.pose
+        return self.check(visible, now)
 
-    def _retry(self):
-        """Until the first good solve, retry every 5 s; afterwards every interval."""
-        return self.interval_s if self.ready else 5.0
+    def check(self, visible, now=None):
+        """visible: {id: 4x2 corners px}. Runs decide_refresh and applies it. Returns True if the pose changed."""
+        now = time.time() if now is None else now
+        expected = self._expected(visible) if self.pose is not None else None
+        tol = self.th["pixel_tol"]
+        usable = {}
+        for i, c in visible.items():  # same re-admission rule as decide_refresh, to choose what to solve from
+            back = expected is not None and i in self.displaced and float(np.mean(
+                np.linalg.norm(np.asarray(c) - np.asarray(expected[i]), axis=1))) <= tol
+            if i not in self.displaced or back:
+                usable[i] = c
+        solve_result, sol = None, None
+        if len(usable) >= 3:
+            sol = solve(usable, self.world, self.K, self.dist)
+            if sol is not None and sol["pos"][2] > 0:
+                dm, dd = self._delta(sol) if self.pose is not None else (0.0, 0.0)
+                solve_result = {"ids": sorted(sol["ids"]), "err": float(sol["err"]), "delta_m": dm, "delta_deg": dd}
+            else:
+                sol = None
+        d = decide_refresh({i: np.asarray(c).tolist() for i, c in visible.items()},
+                           None if expected is None else {i: np.asarray(c).tolist() for i, c in expected.items()},
+                           self.displaced, solve_result, self.state, self.context, self.th)
+        self.log(format_log(self.cam_id, d, list(visible), solve_result))
+        changed = False
+        if d.action == "replace_pose" and sol is not None:
+            self.pose = {"R": np.round(sol["R"], 6).tolist(), "t": np.round(sol["t"], 4).tolist(),
+                         "pos": np.round(sol["pos"], 3).tolist(), "yaw": round(sol["yaw"], 1),
+                         "err": round(sol["err"], 2), "ids": sorted(sol["ids"]), "time": now, "source": "solve"}
+            changed = True
+        self.state, self.weight, self.reasons = d.state, d.weight, d.reasons
+        self.displaced = set(d.displaced)
+        if d.branch != "reconnect:no-markers":
+            self.context = "routine"
+        self.next_check = now + d.next_in_s
+        self.last_decision = d
+        return changed
 
-    def _moved(self, sol):
-        cur = self._current()
-        d = float(np.linalg.norm(np.asarray(sol["pos"]) - np.asarray(cur["pos"])))
-        R0, R1 = np.asarray(cur["R"]), np.asarray(sol["R"])
-        ang = math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(R0.T @ R1) - 1) / 2))))
+    @property
+    def accepts_detections(self):
+        return self.state in ("TRUSTED", DEGRADED) and self.pose is not None
+
+    def _expected(self, visible):
+        rvec, _ = cv2.Rodrigues(np.asarray(self.pose["R"], np.float64))
+        tvec = np.asarray(self.pose["t"], np.float64)
+        out = {}
+        for i in visible:
+            p, _ = cv2.projectPoints(self.world[i], rvec, tvec, self.K, self.dist)
+            out[i] = p.reshape(-1, 2)
+        return out
+
+    def _delta(self, sol):
+        R0 = np.asarray(self.pose["R"], np.float64)
+        c0 = -R0.T @ np.asarray(self.pose["t"], np.float64)
+        d = float(np.linalg.norm(np.asarray(sol["pos"]) - c0))
+        ang = math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(R0.T @ np.asarray(sol["R"])) - 1) / 2))))
         return d, ang
+
+
+def weight_of(state, th):
+    return weight_for(state, th)
+
+
+__all__ = ["AutoPose", "EXCLUDED", "DEGRADED", "OFFLINE"]

@@ -54,6 +54,7 @@
     let world = {bounds: [-0.5, 2, -0.5, 2], walls: [], cameras: []};
     let tracks = [];
     // COCO-17 bones (docs/CONTRACTS.md)
+    const STATE_COLOURS = {TRUSTED: "#3ccf5a", DEGRADED: "#f1bd3b", EXCLUDED: "#ff8a2a", OFFLINE: "#7d8486"};
     const BONES = [[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],[0,5],[0,6]];
     const showSkeletons = document.getElementById("showSkeletons");
     try { showSkeletons.checked = localStorage.getItem("showSkeletons") !== "0"; } catch (e) {}
@@ -71,6 +72,7 @@
         title.textContent = camera.id;
         const status = document.createElement("span");
         status.className = "camera-status";
+        status.dataset.camStatus = camera.id;
         status.textContent = "Waiting for worker";
         bar.append(title, status);
         const image = document.createElement("img");
@@ -79,7 +81,7 @@
         // server restart (feed looks frozen while tracks still update)
         image.src = `/camera/${encodeURIComponent(camera.id)}.mjpg?t=${Date.now()}`;
         image.onerror = () => { status.textContent = "No feed"; };
-        image.onload = () => { status.textContent = "Live"; };
+        image.onload = () => { if (!camera.state) status.textContent = "Live"; };
         card.append(bar, image);
         feeds.append(card);
       }
@@ -129,6 +131,25 @@
       context.strokeStyle = "#718184";
       context.lineWidth = 1;
       context.strokeRect(left, bottom - mapHeight, mapWidth, mapHeight);
+      // cameras: field-of-view wedge coloured by state (TRUSTED green, DEGRADED amber, EXCLUDED orange, OFFLINE grey)
+      for (const cam of world.cameras || []) {
+        if (!cam.pos) continue;
+        const colour = STATE_COLOURS[cam.state] || STATE_COLOURS.OFFLINE;
+        const [cx, cy] = point(cam.pos);
+        const yaw = (cam.yaw || 0) * Math.PI / 180, half = (cam.fov || 60) * Math.PI / 360, reach = 1.2 * scale;
+        context.beginPath(); context.moveTo(cx, cy);
+        context.arc(cx, cy, reach, -yaw - half, -yaw + half);  // canvas y is down: world angle -> -angle
+        context.closePath();
+        context.fillStyle = colour + "33"; context.fill();
+        context.strokeStyle = colour; context.lineWidth = 2; context.stroke();
+        context.beginPath(); context.arc(cx, cy, 6, 0, Math.PI * 2); context.fillStyle = colour; context.fill();
+        const extra = [cam.weight != null ? `w ${(+cam.weight).toFixed(1)}` : "", cam.fps != null ? `${cam.fps} fps` : "",
+                       cam.lag_ms != null ? `${cam.lag_ms} ms` : ""].filter(Boolean).join(" · ");
+        context.fillStyle = colour; context.font = "bold 13px system-ui";
+        context.fillText(`${cam.id} ${cam.state || ""}`, cx + 10, cy + 18);
+        context.font = "12px system-ui"; context.fillStyle = "#c9d4d5";
+        if (extra) context.fillText(extra, cx + 10, cy + 33);
+      }
 
       tracks.forEach((track, index) => {
         if (showSkeletons.checked && track.skeleton) {  // top-down: bones as thin lines (x, y only)
@@ -171,6 +192,17 @@
         socket.onmessage = event => {
           const message = JSON.parse(event.data);
           tracks = message.tracks || [];
+          if (message.cameras) {  // every 1 s: state, weight, fps, lag, pose per camera
+            world.cameras = message.cameras;
+            for (const cam of message.cameras) {
+              const label = document.querySelector(`[data-cam-status="${CSS.escape(cam.id)}"]`);
+              if (label) {
+                label.textContent = `${cam.state} · w ${(+cam.weight || 0).toFixed(1)}` +
+                  (cam.fps != null ? ` · ${cam.fps} fps · ${cam.lag_ms} ms` : "");
+                label.style.color = STATE_COLOURS[cam.state] || STATE_COLOURS.OFFLINE;
+              }
+            }
+          }
           draw();
         };
         socket.onclose = () => { connection.textContent = "Disconnected · reconnecting…"; connection.style.color = "#f1bd61"; setTimeout(start, 1500); };

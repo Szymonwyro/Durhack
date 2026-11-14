@@ -12,6 +12,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from calib.config_io import CAMERAS, MARKERS, ROOT
+from calib.refresh import load_thresholds
+from fusion.cameras import EXCLUDED, OFFLINE, CameraRegistry
 from fusion.tracker import Tracker
 from perception.floor_project import match_floor_detections
 
@@ -27,6 +29,87 @@ camera_state: dict[str, dict[str, Any]] = {}
 state_lock = asyncio.Lock()
 tracker = Tracker()  # people: stable ids, Kalman, visible/predicted, skeletons (fusion/tracker.py)
 camera_timing: dict[str, Any] = {}  # camera -> CameraClock
+THRESHOLDS = load_thresholds()       # config/refresh.json (stale_timeout etc.)
+registry = CameraRegistry([], stale_timeout=THRESHOLDS["stale_timeout"])
+_offline_jpegs: dict[str, bytes] = {}
+
+
+def offline_jpeg(camera_id: str, state: str) -> bytes:
+    """Grey placeholder for the feed, so a disconnected camera never shows a frozen last frame."""
+    key = f"{camera_id}:{state}"
+    if key not in _offline_jpegs:
+        import cv2
+        import numpy as np
+
+        img = np.full((360, 640, 3), 70, np.uint8)
+        cv2.putText(img, f"{camera_id} {state}", (40, 190), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (220, 220, 220), 3)
+        _offline_jpegs[key] = cv2.imencode(".jpg", img)[1].tobytes()
+    return _offline_jpegs[key]
+
+
+def apply_transitions(changes: list[tuple[str, str, str]]) -> None:
+    """Call with state_lock held. OFFLINE/EXCLUDED: purge the camera's detections, take it out of every track's
+    seen_by and skeleton selection (tracks only it saw go predicted). OFFLINE also replaces its feed."""
+    now = time.time()
+    for camera_id, _old, new in changes:
+        if new not in (OFFLINE, EXCLUDED):
+            continue
+        tracker.drop_camera(camera_id, now)
+        state = camera_state.get(camera_id)
+        if state is not None:
+            state["detections"] = []
+            if new == OFFLINE:
+                state["jpeg"] = offline_jpeg(camera_id, OFFLINE)
+                state["frame"] = state["frame"] + 1 if state.get("frame", -1) >= 0 else 0
+
+
+def process_message(camera_id: str, message: dict[str, Any], jpeg: bytes | None) -> list:
+    """Call with state_lock held, after validation. Updates the registry and, if the camera is active, the
+    tracker. Returns the state transitions."""
+    changes = registry.on_message(camera_id, message, time.monotonic())
+    apply_transitions(changes)
+    if message.get("type") == "status":
+        return changes
+    detections = message.get("detections") or []
+    arrival = time.time()
+    clock = camera_timing.setdefault(camera_id, CameraClock())
+    if finite_number(message.get("t_server")):  # worker already converted to our clock
+        captured = clock.capture_time(float(message["t_server"]), arrival, synced=True)
+    else:
+        captured = clock.capture_time(float(message["t"]), arrival)
+    if registry.active(camera_id):
+        tracker.camera_frame(camera_id, detections, arrival, t_capture=captured)
+    else:
+        detections = []  # EXCLUDED: preview only
+    camera_state[camera_id] = {
+        "received_at": time.monotonic(),
+        "timestamp": float(message["t"]),
+        "frame": message.get("frame", 0),
+        "detections": detections,
+        "jpeg": jpeg if jpeg is not None else offline_jpeg(camera_id, str(message.get("state"))),
+    }
+    return changes
+
+
+def cameras_status() -> list[dict[str, Any]]:
+    """Per camera: state, weight, fps, lag, pose (for GET /cameras, /api/world and /tracks)."""
+    snap = registry.snapshot(time.monotonic())
+    out = []
+    for camera_id, camera in camera_config.items():
+        reg = snap.get(camera_id, {"state": OFFLINE, "weight": 0.0, "reasons": []})
+        timing = camera_timing[camera_id].stats() if camera_id in camera_timing else {}
+        out.append({"id": camera_id, "pos": camera.get("pos", [0, 0, 0]), "yaw": camera.get("yaw", 0),
+                    "fov": camera.get("fov", 70), **reg, "fps": timing.get("fps"), "lag_ms": timing.get("lag_ms")})
+    return out
+
+
+async def stale_watchdog() -> None:
+    """Server-side hard disconnect: a camera that sends nothing for stale_timeout goes OFFLINE, whatever it
+    last claimed (hung worker, dead Wi-Fi)."""
+    while True:
+        await asyncio.sleep(0.25)
+        async with state_lock:
+            apply_transitions(registry.check_stale(time.monotonic()))
 
 
 class CameraClock:
@@ -137,9 +220,11 @@ def map_tracks(snapshot: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
 
 @app.on_event("startup")
 async def startup() -> None:
-    global camera_config, camera_state
+    global camera_config, camera_state, registry
     camera_config, _, _ = load_world_config()
     camera_state = {}
+    registry = CameraRegistry(list(camera_config), stale_timeout=THRESHOLDS["stale_timeout"])
+    asyncio.get_running_loop().create_task(stale_watchdog())
 
 
 @app.get("/")
@@ -162,10 +247,18 @@ async def health() -> dict[str, Any]:
                     if camera_id in camera_state
                     else None,
                     **(camera_timing[camera_id].stats() if camera_id in camera_timing else {}),
+                    "state": registry.cams.get(camera_id, {}).get("state", OFFLINE),
+                    "weight": registry.cams.get(camera_id, {}).get("weight", 0.0),
                 }
                 for camera_id in camera_config
             },
         }
+
+
+@app.get("/cameras")
+async def cameras() -> dict[str, Any]:
+    async with state_lock:
+        return {"t": time.time(), "cameras": cameras_status()}
 
 
 @app.get("/api/world")
@@ -177,15 +270,7 @@ async def world() -> JSONResponse:
     padding = 0.5
     return JSONResponse(
         {
-            "cameras": [
-                {
-                    "id": camera_id,
-                    "pos": camera.get("pos", [0, 0, 0]),
-                    "yaw": camera.get("yaw", 0),
-                    "fov": camera.get("fov", 70),
-                }
-                for camera_id, camera in camera_config.items()
-            ],
+            "cameras": cameras_status(),  # id, pos, yaw, fov + state, weight, fps, lag_ms
             "walls": walls,
             "bounds": [
                 min(xs) - padding,
@@ -221,6 +306,11 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
             if message.get("cam") != camera_id:
                 await websocket.send_json({"error": "payload camera ID must match ingest URL"})
                 continue
+            if message.get("type") == "status":  # e.g. the worker's final {"state": "OFFLINE"}
+                async with state_lock:
+                    process_message(camera_id, message, None)
+                await websocket.send_json({"ok": True, "server_t": time.time()})
+                continue
             detections = message.get("detections")
             jpeg_data = message.get("jpeg")
             frame_number = message.get("frame")
@@ -248,36 +338,31 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
             if isinstance(pose, dict) and all(k in pose for k in ("R", "t", "pos", "yaw")):
                 camera_config[camera_id].update({k: pose[k] for k in ("R", "t", "pos", "yaw")})
             async with state_lock:
-                arrival = time.time()
-                clock = camera_timing.setdefault(camera_id, CameraClock())
-                if finite_number(message.get("t_server")):  # worker already converted to our clock
-                    captured = clock.capture_time(float(message["t_server"]), arrival, synced=True)
-                else:
-                    captured = clock.capture_time(float(message["t"]), arrival)
-                tracker.camera_frame(camera_id, detections, arrival, t_capture=captured)
-                camera_state[camera_id] = {
-                    "received_at": time.monotonic(),
-                    "timestamp": float(message["t"]),
-                    "frame": frame_number,
-                    "detections": detections,
-                    "jpeg": jpeg,
-                }
+                process_message(camera_id, message, jpeg)
             # server_t lets the worker map its clock onto ours (NTP-style, from the round trip)
             await websocket.send_json({"ok": True, "frame": frame_number, "server_t": time.time()})
     except WebSocketDisconnect:
         return
+    finally:  # socket closed (or handler crashed): this camera is OFFLINE now
+        async with state_lock:
+            apply_transitions(registry.on_disconnect(camera_id, time.monotonic()))
 
 
 @app.websocket("/tracks")
 async def tracks(websocket: WebSocket) -> None:
     await websocket.accept()
+    last_cameras = 0.0
     try:
         while True:
             async with state_lock:
-                snapshot = dict(camera_state)
+                snapshot = {c: s for c, s in camera_state.items() if registry.active(c)}
                 now = time.time()
                 people = tracker.tracks(now)
-            await websocket.send_json({"t": now, "tracks": people + map_tracks(snapshot)})
+                message = {"t": now, "tracks": people + map_tracks(snapshot)}
+                if now - last_cameras >= 1.0:  # camera states every 1 s
+                    message["cameras"] = cameras_status()
+                    last_cameras = now
+            await websocket.send_json(message)
             await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         return

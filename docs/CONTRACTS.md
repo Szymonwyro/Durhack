@@ -59,6 +59,21 @@ The server uses an active zone as a loose position measurement: its centroid, wi
   - `frozen`: `true` while the track is `predicted`. The last skeleton is translated with the Kalman displacement
     since `last_seen` (pose not updated). Dropped after 3 s frozen.
 
+### Camera states (optional fields, backward compatible)
+| State | Weight | Meaning | Map colour |
+|---|---|---|---|
+| `TRUSTED` | 1.0 | markers where expected (or a good re-solve) | green |
+| `DEGRADED` | `degraded_weight` (0.4) | poor re-solve, or reconnected and not yet verified | amber |
+| `EXCLUDED` | 0 | markers say the camera moved and it can't re-solve; sends preview heartbeats, no detections | orange |
+| `OFFLINE` | 0 | socket closed, final OFFLINE status, or no message for `stale_timeout` (2.5 s), decided by the server | grey |
+- Worker → server messages (detections and `{"type":"status",...}`) carry `"state"`, `"weight"`, `"reasons"`.
+  Old workers without them are treated as TRUSTED (server logs a warning).
+- EXCLUDED/OFFLINE cameras contribute nothing: their detections are purged, they leave every track's `seen_by`
+  and skeleton selection; tracks only they saw go `predicted` (same as a person going missing).
+- Exposed as `{"id","pos","yaw","fov","state","weight","reasons","fps","lag_ms",...}` in `GET /cameras`,
+  `GET /api/world` `cameras`, and a `"cameras"` list in `/tracks` messages once per second.
+- Settings: config/refresh.json (calib/refresh.py has the rules).
+
 ### Pose skeleton (COCO-17)
 COCO-17 joint order (index: name): 0 nose, 1 left_eye, 2 right_eye, 3 left_ear, 4 right_ear, 5 left_shoulder,
 6 right_shoulder, 7 left_elbow, 8 right_elbow, 9 left_wrist, 10 right_wrist, 11 left_hip, 12 right_hip, 13 left_knee,

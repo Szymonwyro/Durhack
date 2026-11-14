@@ -142,6 +142,12 @@ Quality targets the overlay depends on:
 - Foot-point error under ~15 cm in the overlap areas (box should wrap the real person).
 - Capture-to-send latency under ~150 ms. The Quest extrapolates with vel, so a correct vel matters more than a perfectly smooth pos.
 
+## 3b. Camera states — NEW, optional (fusion server; not yet passed through the bridge)
+
+The fusion server's `/tracks` carries `"cameras": [{"id","pos","yaw","fov","state","weight","fps","lag_ms"}, ...]` once
+per second (also `GET /cameras`). `state` is TRUSTED / DEGRADED / EXCLUDED / OFFLINE (see docs/CONTRACTS.md "Camera
+states"). Viewers may colour camera frusta by state (green / amber / orange / grey). Ignoring the field is fine.
+
 ## 3a. Pose skeleton on tracks — NEW, optional (Role 2 server, Role 3 worker; Role 1 renders)
 
 Each track may carry a skeleton; omitted when there is none. Clients that don't know the field ignore it.
