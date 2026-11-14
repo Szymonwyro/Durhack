@@ -1,9 +1,9 @@
 """Lens calibration (K, dist) from a chessboard -> config/cameras.json.
 
-    python -m calib.intrinsics camA --source 1 --width 1280 --height 720
-    python -m calib.intrinsics camA --square-mm 31.4      # optional: square size doesn't change K/dist,
+    python -m calib.intrinsics camB --source 1 --width 640 --height 480
+    python -m calib.intrinsics camB --square-mm 31.4      # optional: square size doesn't change K/dist,
                                                          # so a chessboard shown full-screen on a laptop/iPad works
-    python -m calib.intrinsics camA --images "recordings/calib/camA/*.jpg"   # redo offline from saved views
+    python -m calib.intrinsics camB --images "recordings/calib/camB/*.jpg"   # redo offline from saved views
 
 Live mode auto-captures a view when the board is found, still, and in a new position (SPACE forces one,
 C calibrates early, Q/ESC quits). Move the board around the WHOLE image, including the corners, and tilt it
@@ -153,7 +153,7 @@ def run_live(a, square_m):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("cam_id")
+    p.add_argument("cam_id", nargs="?", default="camB", help="camera ID to update (default: camB)")
     p.add_argument("--source", help="OpenCV index or URL (overrides config)")
     p.add_argument("--width", type=int, default=None, help="capture width (default: config, else camera default)")
     p.add_argument("--height", type=int, default=None)
