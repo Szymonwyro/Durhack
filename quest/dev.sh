@@ -58,7 +58,11 @@ fi
 adb reverse tcp:$PORT tcp:$PORT >/dev/null && echo "adb reverse tcp:$PORT ok"
 
 URL="http://localhost:$PORT/quest/$QUERY"
-adb shell am start -a android.intent.action.VIEW -d "'$URL'" com.oculus.browser >/dev/null && echo "opened $URL"
+OUT=$(adb shell am start -a android.intent.action.VIEW -d "'$URL'" com.oculus.browser 2>&1)
+if echo "$OUT" | grep -q Error; then
+  echo "could not open the page (headset still booting? retry in a few seconds):"; echo "$OUT"; exit 1
+fi
+echo "opened $URL"
 
 adb forward tcp:9222 localabstract:chrome_devtools_remote >/dev/null && echo "devtools forwarded to localhost:9222"
 sleep 1
