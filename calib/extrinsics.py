@@ -1,6 +1,7 @@
 """Camera pose in the world frame from floor ArUco markers -> R, t (world -> camera) in config/cameras.json.
 
     python -m calib.extrinsics camA                 # live: averages corners over frames, S saves, Q quits
+    python -m calib.extrinsics camB --source 1      # use local OpenCV camera index 1
     python -m calib.extrinsics camB --image snap.jpg   # from one still (e.g. a snapshot copied off the UNO Q)
 
 Needs K/dist for the camera first (calib/intrinsics.py) and marker positions in config/markers.json.
@@ -21,7 +22,7 @@ import cv2
 import numpy as np
 
 from calib.capture import open_camera
-from calib.config_io import get_camera, load_markers, update_camera
+from calib.config_io import get_camera, load_markers, parse_source, update_camera
 
 ARUCO_DICTS = {"DICT_4X4_50": cv2.aruco.DICT_4X4_50}
 
@@ -164,7 +165,11 @@ def save(cam_id, sol):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("cam_id")
-    p.add_argument("--source", help="OpenCV index or URL (overrides config)")
+    p.add_argument(
+        "--source",
+        type=parse_source,
+        help="Local OpenCV camera index (e.g. 1) or stream URL; overrides config source",
+    )
     p.add_argument("--image", help="solve from one image instead of live")
     p.add_argument("--frames", type=int, default=30, help="frames to average in live mode")
     p.add_argument("--dry-run", action="store_true")
@@ -196,11 +201,25 @@ def main():
         return
 
     cam = open_camera(a.cam_id, a.source)
+    first_frame_deadline = time.monotonic() + 6
+    frame = None
+    while frame is None and time.monotonic() < first_frame_deadline:
+        _, frame = cam.read()
+        if frame is None:
+            time.sleep(0.05)
+    if frame is None:
+        source = cam.source
+        cam.release()
+        sys.exit(
+            f"{a.cam_id}: no frames received from source {source!r}. "
+            "For a locally connected camera, try --source 0 or --source 1; "
+            "close other apps using the camera and check its resolution."
+        )
     history = {}  # id -> list of 4x2 corners
     sol = None
     print("collecting... S = save, R = reset averaging, Q = quit")
     while True:
-        t, frame = cam.read()
+        _, frame = cam.read()
         if frame is None:
             time.sleep(0.05)
             continue

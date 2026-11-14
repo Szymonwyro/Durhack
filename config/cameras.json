@@ -27,18 +27,29 @@
     },
     {
       "id": "camB",
-      "source": "http://127.0.0.1:8095/camB/stream.mjpg",
+      "source": 1,
       "intrinsics_note": "copied from camA (same camera model); re-run calib.intrinsics camB if it's a different model",
-      "width": 1280,
-      "height": 720,
+      "width": 640,
+      "height": 480,
       "K": [
-        [1071.298, 0.0, 632.494],
-        [0.0, 1068.002, 370.547],
+        [535.649, 0.0, 316.247],
+        [0.0, 712.001, 247.031],
         [0.0, 0.0, 1.0]
       ],
       "dist": [0.171825, -0.802891, -0.000217, -0.001331, 0.887223],
       "intrinsics_rms_px": 0.463,
-      "fov": 61.7
+      "fov": 61.7,
+      "R": [
+        [0.973423, -0.110468, 0.200612],
+        [0.076794, -0.667812, -0.740358],
+        [0.215757, 0.736087, -0.64158]
+      ],
+      "t": [-1.3983, 0.4869, 2.4663],
+      "pos": [0.792, -1.645, 2.223],
+      "yaw": 73.7,
+      "extrinsics_rms_px": 1.9,
+      "extrinsics_markers": [3, 5, 7],
+      "extrinsics_time": "2026-11-14 17:05"
     }
   ]
 }
