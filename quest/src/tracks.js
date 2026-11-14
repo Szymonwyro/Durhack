@@ -84,6 +84,7 @@ class TrackView {
       this.lineMat.opacity = alpha;
     }
     this.box.material.color.setHex(color);
+    this.dot = { pos: this.disp, color, alpha, predicted, hidden }; // for the minimap
     this.box.material.depthTest = !hidden; // behind a wall: draw on top of everything
     this.box.renderOrder = hidden ? 10 : 0;
     this.fill.visible = hidden && !predicted;
@@ -153,3 +154,4 @@ export function updateTracks(dt, head, walls, fade, serverNow) {
 }
 
 export const trackCount = () => views.size;
+export const trackDots = () => [...views.values()].filter((v) => v.dot && v.dot.alpha > 0).map((v) => v.dot);

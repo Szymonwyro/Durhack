@@ -29,17 +29,16 @@
     {
       "id": "camB",
       "source": "http://127.0.0.1:8095/camB/stream.mjpg",
-      "intrinsics_note": "copied from camA (same camera model); re-run calib.intrinsics camB if it's a different model",
-      "width": 640,
-      "height": 480,
+      "width": 1280,
+      "height": 720,
       "K": [
-        [535.649, 0.0, 316.247],
-        [0.0, 712.001, 247.031],
+        [1055.325, 0.0, 630.344],
+        [0.0, 1056.364, 352.999],
         [0.0, 0.0, 1.0]
       ],
-      "dist": [0.171825, -0.802891, -0.000217, -0.001331, 0.887223],
-      "intrinsics_rms_px": 0.463,
-      "fov": 61.7,
+      "dist": [0.210532, -0.935611, 0.001781, -0.000183, 1.134832],
+      "intrinsics_rms_px": 0.253,
+      "fov": 62.5,
       "R": [
         [0.973423, -0.110468, 0.200612],
         [0.076794, -0.667812, -0.740358],

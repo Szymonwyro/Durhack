@@ -5,9 +5,10 @@ import { MOCK, DEBUG, DATA_TIMEOUT_S, FADE_S } from './config.js';
 import { mapRoot, worldToMap } from './frames.js';
 import { buildWorld, buildCorners, setLayers, getWorld } from './world.js';
 import { buildZones, updateZones } from './zones.js';
-import { tracksGroup, onTracksMsg, updateTracks, trackCount } from './tracks.js';
+import { tracksGroup, onTracksMsg, updateTracks, trackCount, trackDots } from './tracks.js';
+import { attachMinimap, updateMinimap, toggleMinimap } from './minimap.js';
 import { attachHud, updateHud } from './hud.js';
-import { initAlign, setWorld as alignSetWorld, getPoints, getState, getFit, updateAlign } from './align.js';
+import { initAlign, setWorld as alignSetWorld, getPoints, getState, getFit, updateAlign, setMinimapToggle } from './align.js';
 import { createFeed, startNet, invalidCounts } from './net.js';
 import { startMock } from './mock.js';
 
@@ -30,6 +31,8 @@ const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerH
 scene.add(camera); // head-locked panels are children of the camera
 scene.add(mapRoot);
 attachHud(camera);
+attachMinimap(camera);
+setMinimapToggle(toggleMinimap);
 initAlign(renderer, scene, camera);
 alignSetWorld({ world_version: 0, align_points: [] }); // fallback corners until /world arrives
 buildCorners(getPoints());
@@ -56,7 +59,7 @@ const feed = createFeed({
   onTracks: (m) => { onTracksMsg(m); pirZones = m.zones; },
 });
 if (MOCK) startMock(feed);
-else startNet(feed, (s) => { netStatus = s; console.log('[net]', s); });
+else startNet(feed, (s) => { if (s !== netStatus) console.log('[net]', s); netStatus = s; }); // log changes only
 
 // --- enter AR (own button: three's ARButton forces the 'local' reference space) ---
 const sessionInit = { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking', 'anchors'] };
@@ -96,6 +99,7 @@ checkSupport().then((problem) => {
 
 // --- render loop ---
 const headWorld = new THREE.Vector3();
+const aheadWorld = new THREE.Vector3();
 let last = performance.now() / 1000;
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000;
@@ -117,6 +121,20 @@ renderer.setAnimationLoop(() => {
   const head = presenting ? worldToMap(headWorld) : null;
   updateTracks(dt, head, getWorld().walls, fade, feed.serverNow());
   updateZones(aligned ? pirZones : [], now, fade);
+
+  // minimap: heading = direction the head faces, in map coords
+  let heading = 0;
+  if (head) {
+    camera.getWorldDirection(aheadWorld).add(headWorld);
+    const ahead = worldToMap(aheadWorld);
+    heading = Math.atan2(ahead[1] - head[1], ahead[0] - head[0]);
+  }
+  const w = getWorld();
+  updateMinimap(now, aligned, head, heading, {
+    corners: getPoints().map((p) => p.pos), walls: w.walls, objects: w.objects, zones: w.zones,
+    activeZones: new Set(fade > 0 ? pirZones.filter((z) => z.active).map((z) => z.sensor) : []),
+    dots: trackDots(),
+  });
 
   if (DEBUG) {
     const fit = getFit();
