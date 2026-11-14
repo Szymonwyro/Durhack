@@ -91,6 +91,39 @@ def load_walls() -> list[dict[str, object]]:
     return data.get("walls", [])
 
 
+CAMERA_WINDOW = "Camera view"
+
+
+def floor_square_pixels(camera: SingleCameraConfig) -> np.ndarray | None:
+    """Corner-marker square (config/markers.json) projected into the camera image, or None."""
+    markers_path = ROOT / "config" / "markers.json"
+    if not markers_path.is_file():
+        return None
+    markers = json.loads(markers_path.read_text(encoding="utf-8"))["markers"]
+    centre = np.mean([[m["x"], m["y"]] for m in markers], axis=0)
+    ordered = sorted(markers, key=lambda m: np.arctan2(m["y"] - centre[1], m["x"] - centre[0]))
+    world = np.array([[m["x"], m["y"], 0.0] for m in ordered], np.float64)
+    rvec, _ = cv2.Rodrigues(np.asarray(camera["R"], np.float64))
+    pixels, _ = cv2.projectPoints(world, rvec, np.asarray(camera["t"], np.float64),
+                                  np.asarray(camera["K"], np.float64), np.asarray(camera["dist"], np.float64))
+    return pixels.reshape(-1, 2).astype(np.int32)
+
+
+def draw_camera_view(image: np.ndarray, frame: FrameDetections, square: np.ndarray | None) -> np.ndarray:
+    view = image.copy()
+    if square is not None:
+        cv2.polylines(view, [square], True, (0, 200, 255), 2)
+    for det in frame["detections"]:
+        x, y, w, h = (int(v) for v in det["bbox"])
+        cv2.rectangle(view, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(view, f"{det['class_name']} {det['confidence']:.2f}", (x, max(20, y - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        if det.get("foot"):
+            fx, fy = (int(v) for v in det["foot"])
+            cv2.circle(view, (fx, fy), 7, (0, 0, 255), -1)
+    return view
+
+
 def as_map_detections(
     frame: FrameDetections,
     camera: SingleCameraConfig,
@@ -128,6 +161,8 @@ def main() -> None:
         metavar=("XMIN", "XMAX", "YMIN", "YMAX"),
         help="Map bounds in world metres; otherwise inferred from walls and camera position",
     )
+    parser.add_argument("--show-camera", action="store_true",
+                        help="Also show the camera view with boxes, foot points and the calibrated floor square")
     args = parser.parse_args()
     if not 0 <= args.confidence <= 1:
         parser.error("--confidence must be between 0 and 1")
@@ -140,8 +175,11 @@ def main() -> None:
         local_weights = ROOT / "weights" / "yolo11n.pt"
         model_path = str(local_weights) if local_weights.is_file() else "yolo11n.pt"
 
+    square = floor_square_pixels(camera) if args.show_camera else None
+
     def show_map(image: np.ndarray, frame: FrameDetections) -> bool:
-        del image
+        if args.show_camera:
+            cv2.imshow(CAMERA_WINDOW, draw_camera_view(image, frame, square))
         detections = as_map_detections(frame, camera)
         canvas = draw_map(detections, walls, bounds, 1, [])
         cv2.putText(
