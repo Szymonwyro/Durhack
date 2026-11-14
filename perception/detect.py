@@ -12,6 +12,7 @@ import argparse
 from collections.abc import Iterator, Sequence
 import json
 from pathlib import Path
+import time
 from typing import Callable, TypedDict
 
 import cv2
@@ -30,6 +31,7 @@ class Detection(TypedDict):
 class FrameDetections(TypedDict):
     frame: int
     time_seconds: float
+    timestamp: float
     width: int
     height: int
     detections: list[Detection]
@@ -79,6 +81,7 @@ def detect_video(
                 verbose=False,
             )[0]
             frame_height, frame_width = frame.shape[:2]
+            captured_at = time.time()
             time_seconds = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
             if time_seconds <= 0 and fps > 0:
                 time_seconds = frame_index / fps
@@ -104,6 +107,7 @@ def detect_video(
             frame_result: FrameDetections = {
                 "frame": frame_index,
                 "time_seconds": time_seconds,
+                "timestamp": captured_at,
                 "width": frame_width,
                 "height": frame_height,
                 "detections": detections,

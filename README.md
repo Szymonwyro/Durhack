@@ -30,6 +30,22 @@ tools/iphone_cert_help.sh      # how iPhones trust the server cert (mkcert CA / 
 ```
 On macOS, grant camera access to your terminal app first: **System Settings → Privacy & Security → Camera**. Then restart the terminal.
 
+## Shared live map (multiple computers)
+Use one computer as the fusion server. Put the same calibrated `config/cameras.json` on each computer; `source` is local to each computer, so pass the local camera index with `--source`.
+
+On the server computer, from the project directory:
+```powershell
+python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8000
+```
+Find its LAN IP with `python tools/lan_ip.py`. Allow Python/Uvicorn through the OS firewall on the private network if prompted.
+
+On each camera computer, run one worker per attached camera, replacing `<SERVER_IP>` and the local camera index:
+```powershell
+python -m tools.camera_worker camA --source 1 --server ws://<SERVER_IP>:8000/ingest/camA
+python -m tools.camera_worker camB --source 0 --server ws://<SERVER_IP>:8000/ingest/camB
+```
+Each worker runs detection locally and sends floor-projected detections plus a small annotated preview to the server. Open `http://<SERVER_IP>:8000/` in a browser on **both** computers to see the shared map and camera feeds. Keep the camera fixed after calibration and make sure all devices are on a network that permits device-to-device traffic. The map combines nearby same-class floor positions; it is a simple live fusion display, not persistent identity tracking.
+
 ## HTTPS for iPhones (and the Quest)
 Mobile browsers only allow `getUserMedia` (camera) over HTTPS, except on localhost.
 

@@ -1,4 +1,165 @@
 <!doctype html>
-<!-- TODO (D): command map - top-down view of walls, camera FOVs, tracks, uncertainty ellipses.
-     Subscribes to track messages (docs/CONTRACTS.md). Write during the event. -->
-<html><head><meta charset="utf-8"><title>Command map</title></head><body></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DurHack live camera map</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101518; color: #e8eeee; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.4rem; border-bottom: 1px solid #303a3e; }
+    h1 { margin: 0; font-size: 1.2rem; }
+    #connection { font-size: .9rem; color: #f1bd61; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 38%); gap: 1rem; padding: 1rem; }
+    section { min-width: 0; }
+    h2 { margin: 0 0 .65rem; font-size: 1rem; color: #c3d0d2; }
+    #map { width: 100%; height: min(72vh, 760px); min-height: 420px; display: block; border: 1px solid #344044; background: #192124; }
+    #feeds { display: grid; gap: .8rem; }
+    article { border: 1px solid #344044; background: #192124; }
+    article header { padding: .5rem .7rem; }
+    article img { display: block; width: 100%; min-height: 130px; object-fit: contain; background: #080b0c; }
+    .camera-status { color: #f1bd61; font-size: .8rem; }
+    #tracks { padding: .7rem; color: #aebbbc; font-size: .85rem; }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+      #map { height: 55vh; min-height: 340px; }
+      #feeds { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DurHack · shared live camera map</h1>
+    <span id="connection">Connecting to fusion server…</span>
+  </header>
+  <main>
+    <section>
+      <h2>Floor positions · metres</h2>
+      <canvas id="map" aria-label="Top-down live map"></canvas>
+      <div id="tracks">Waiting for camera detections…</div>
+    </section>
+    <section>
+      <h2>Camera feeds</h2>
+      <div id="feeds"></div>
+    </section>
+  </main>
+  <script>
+    const canvas = document.getElementById("map");
+    const context = canvas.getContext("2d");
+    const connection = document.getElementById("connection");
+    const feeds = document.getElementById("feeds");
+    const tracksLabel = document.getElementById("tracks");
+    let world = {bounds: [-0.5, 2, -0.5, 2], walls: [], cameras: []};
+    let tracks = [];
+
+    function setupFeeds(cameras) {
+      feeds.replaceChildren();
+      for (const camera of cameras) {
+        const card = document.createElement("article");
+        const bar = document.createElement("header");
+        const title = document.createElement("strong");
+        title.textContent = camera.id;
+        const status = document.createElement("span");
+        status.className = "camera-status";
+        status.textContent = "Waiting for worker";
+        bar.append(title, status);
+        const image = document.createElement("img");
+        image.alt = `Annotated live feed from ${camera.id}`;
+        image.src = `/camera/${encodeURIComponent(camera.id)}.mjpg`;
+        image.onerror = () => { status.textContent = "No feed"; };
+        image.onload = () => { status.textContent = "Live"; };
+        card.append(bar, image);
+        feeds.append(card);
+      }
+    }
+
+    function draw() {
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      if (!width || !height) return;
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = "#192124";
+      context.fillRect(0, 0, width, height);
+
+      const [xmin, xmax, ymin, ymax] = world.bounds;
+      const pad = 42;
+      const scale = Math.min((width - 2 * pad) / (xmax - xmin), (height - 2 * pad) / (ymax - ymin));
+      const mapWidth = (xmax - xmin) * scale;
+      const mapHeight = (ymax - ymin) * scale;
+      const left = (width - mapWidth) / 2;
+      const bottom = (height + mapHeight) / 2;
+      const point = ([x, y]) => [left + (x - xmin) * scale, bottom - (y - ymin) * scale];
+
+      context.strokeStyle = "#303a3e";
+      context.lineWidth = 1;
+      for (let x = Math.ceil(xmin); x <= xmax; x += 1) {
+        const [px] = point([x, ymin]);
+        context.beginPath(); context.moveTo(px, bottom - mapHeight); context.lineTo(px, bottom); context.stroke();
+        context.fillStyle = "#96a2a4"; context.fillText(`${x}m`, px + 3, bottom + 16);
+      }
+      for (let y = Math.ceil(ymin); y <= ymax; y += 1) {
+        const [, py] = point([xmin, y]);
+        context.beginPath(); context.moveTo(left, py); context.lineTo(left + mapWidth, py); context.stroke();
+        context.fillStyle = "#96a2a4"; context.fillText(`${y}m`, left - 32, py - 4);
+      }
+      context.strokeStyle = "#758184";
+      context.lineWidth = 5;
+      for (const wall of world.walls) {
+        const a = point(wall.a), b = point(wall.b);
+        context.beginPath(); context.moveTo(...a); context.lineTo(...b); context.stroke();
+      }
+      context.strokeStyle = "#718184";
+      context.lineWidth = 1;
+      context.strokeRect(left, bottom - mapHeight, mapWidth, mapHeight);
+
+      tracks.forEach((track, index) => {
+        const [x, y] = point(track.pos);
+        const color = `hsl(${(track.class_id * 71 + 175) % 360} 90% 62%)`;
+        context.beginPath(); context.arc(x, y, 8, 0, Math.PI * 2);
+        context.fillStyle = color; context.fill();
+        context.strokeStyle = "#f4ffff"; context.lineWidth = 1.5; context.stroke();
+        const cameras = (track.seen_by || []).join(",");
+        context.fillStyle = "#eef5f5";
+        context.font = "13px system-ui";
+        context.fillText(`${track.class_name} ${track.pos[0].toFixed(2)}, ${track.pos[1].toFixed(2)}m · ${cameras}`, x + 12, y - 10);
+      });
+      tracksLabel.textContent = tracks.length
+        ? `${tracks.length} current detection group${tracks.length === 1 ? "" : "s"} · positions combined from nearby camera observations`
+        : "No recent detections";
+    }
+
+    async function start() {
+      try {
+        const response = await fetch("/api/world");
+        if (!response.ok) throw new Error(`world config returned ${response.status}`);
+        world = await response.json();
+        setupFeeds(world.cameras);
+        draw();
+        const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+        const socket = new WebSocket(`${scheme}//${location.host}/tracks`);
+        socket.onopen = () => { connection.textContent = "Connected"; connection.style.color = "#85dc9a"; };
+        socket.onmessage = event => {
+          const message = JSON.parse(event.data);
+          tracks = message.tracks || [];
+          draw();
+        };
+        socket.onclose = () => { connection.textContent = "Disconnected · reconnecting…"; connection.style.color = "#f1bd61"; setTimeout(start, 1500); };
+        socket.onerror = () => socket.close();
+      } catch (error) {
+        connection.textContent = `Server error: ${error.message}`;
+        connection.style.color = "#ff8585";
+        setTimeout(start, 2000);
+      }
+    }
+    window.addEventListener("resize", draw);
+    start();
+  </script>
+</body>
+</html>
