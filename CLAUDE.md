@@ -84,6 +84,9 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 - **Live cameras → Quest (Role 1):** until fusion/server.py speaks quest/INTERFACE.md, run Role 1's bridge and feed it
   the fusion server's fused positions: `python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py
   ws://10.247.206.87:8010/tracks` (the server on this Windows PC, see README "Live server"). Bridge = stable ids, Kalman, world/align_points on :8001.
+- **Test walk 2 (30 s, camA from its new spot, sees whole bodies):** samples/test_walk2_camA.jsonl (boxes) and
+  samples/test_walk2_camA_pose.jsonl (+ kp3d skeletons, 820/826 detections); camA pose used: samples/test_walk2_camA_cameras.json.
+  Replay like the first one, e.g. `python3 tools/test_walk.py replay samples/test_walk2_camA_pose.jsonl --fusion --url ws://<server>/ingest/camA`.
 - **Test data without cameras (Role 1/2):** samples/test_walk_camA.jsonl = 60 s of one person (Szymon) walking in
   and out of the 1.5 m square, seen by camA, as contract detection messages in world metres. Replay it into any
   server's WS /ingest at real pace, looping: `python3 tools/test_walk.py replay [--url ws://127.0.0.1:8001/ingest]`
