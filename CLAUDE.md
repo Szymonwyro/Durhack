@@ -70,6 +70,10 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   locked, near the Mac). While attached it SHIFTS OpenCV camera indices, so cameras MUST be chosen
   by name/resolution via config/cameras.json. Option for camera C: iPhone via Continuity Camera on Mac-2.
 
+## Handoffs
+- **Windows laptop / camB (Worker 2):** follow docs/HANDOFF_CAMB_WINDOWS.md to push the USB camera to
+  Mac-1's relay (`tools/stream_test.py push http://10.247.46.145:8095 --cam camB --source <N>`).
+
 ## Device roles
 | Device | Runs |
 |---|---|
