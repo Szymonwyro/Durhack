@@ -98,7 +98,7 @@ if [ "${1:-}" = "--untethered" ]; then
 
   # live feed: fusion server -> bridge
   if [ -n "$FUSION" ] && ! { [ -f "$FUSION_PID" ] && kill -0 "$(cat "$FUSION_PID")" 2>/dev/null; }; then
-    nohup bash -c "while true; do python3 -u tools/fusion_to_quest.py $FUSION; sleep 2; done" >/tmp/quest_fusion.log 2>&1 &
+    nohup bash -c "while true; do python3 -u tools/fusion_to_quest.py $FUSION --margin 0.2; sleep 2; done" >/tmp/quest_fusion.log 2>&1 &
     echo $! > "$FUSION_PID"
   fi
   [ -n "$FUSION" ] && echo "live feed: $FUSION -> bridge   log /tmp/quest_fusion.log"

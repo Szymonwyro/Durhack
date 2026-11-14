@@ -16,7 +16,7 @@ import time
 import urllib.request
 
 DEVTOOLS = "http://localhost:9222"
-MATCH = "localhost:8001/quest/"
+MATCH = "/quest/"  # any viewer tab: USB (localhost:8001) or Wi-Fi (https://<mac-ip>:8443)
 
 
 def ts():
