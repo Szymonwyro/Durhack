@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quest viewer</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 16px system-ui, sans-serif; }
+    #panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+             justify-content: center; gap: 16px; text-align: center; padding: 16px; }
+    #enter { font-size: 28px; padding: 18px 40px; border-radius: 12px; border: 2px solid #00E5FF;
+             background: #002a30; color: #00E5FF; cursor: pointer; }
+    #enter:disabled { opacity: 0.4; cursor: default; }
+    #status { max-width: 40em; white-space: pre-line; color: #ffb347; }
+    canvas { display: block; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.module.js?v=0.187.0",
+      "three/addons/": "./vendor/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="panel">
+    <h1>See-through-walls viewer</h1>
+    <button id="enter" disabled>Checking WebXR…</button>
+    <div id="status"></div>
+  </div>
+  <script type="module">
+    // cache-bust the entry module; quest/serve.py sends no-store for everything it imports
+    import(`./src/main.js?v=${Date.now()}`).catch(e => {
+      document.getElementById('status').textContent = 'Failed to load: ' + e;
+      console.error(e);
+    });
+  </script>
+</body>
+</html>
