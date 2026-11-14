@@ -56,7 +56,7 @@ const feed = createFeed({
   onTracks: (m) => { onTracksMsg(m); pirZones = m.zones; },
 });
 if (MOCK) startMock(feed);
-else startNet(feed, (s) => { netStatus = s; console.log('[net]', s); });
+else startNet(feed, (s) => { if (s !== netStatus) console.log('[net]', s); netStatus = s; }); // log changes only
 
 // --- enter AR (own button: three's ARButton forces the 'local' reference space) ---
 const sessionInit = { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking', 'anchors'] };

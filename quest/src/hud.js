@@ -6,7 +6,7 @@ import { CanvasText } from './label.js';
 const text = new CanvasText(512, 230);
 const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.076),
   new THREE.MeshBasicMaterial({ map: text.texture, transparent: true, depthTest: false }));
-panel.position.set(-0.24, -0.07, -0.6);
+panel.position.set(-0.1, -0.06, -0.6); // just left of centre, above the calibration panel
 panel.renderOrder = 30;
 panel.visible = DEBUG;
 
