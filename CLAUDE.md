@@ -71,6 +71,8 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
   by name/resolution via config/cameras.json. Option for camera C: iPhone via Continuity Camera on Mac-2.
 
 ## Handoffs
+- **camC on Jack's computer (worker 1):** docs/HANDOFF_CAMC_JACK.md (own camera: lens calibration, position, worker
+  into Caspar's server; Caspar restarts his server after camC is pushed).
 - **Laptop 2 = camB worker only (Caspar):** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md, sending to Mac-1's server
   `ws://10.247.206.87:8010/ingest/camB`.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
