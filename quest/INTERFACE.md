@@ -6,8 +6,8 @@ Owner: Role 1 (Quest). Status: proposal. Items marked NEW are not yet in docs/CO
 
 The Quest viewer (quest/src/net.js) implements sections 1–3 exactly and **drops every message that doesn't match**,
 so the real server still can't feed the headset directly. **Live path that works now:** the fusion server runs on
-Mac-1 (`ws://10.247.46.145:8010/tracks`, see README "Live server"); Role 1's bridge turns it into this spec:
-`python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks --margin 0.2`.
+this Windows PC (`ws://10.247.206.87:8010/tracks`, see README "Live server"); Role 1's bridge turns it into this spec:
+`python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py ws://10.247.206.87:8010/tracks --margin 0.2`.
 Offline (Role 3's recording):
 
 ```bash

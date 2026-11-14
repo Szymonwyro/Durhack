@@ -37,11 +37,11 @@ firewall changes are needed**.
    If nothing opens: Windows Settings → Privacy & security → Camera → allow desktop apps.
 4. **Start pushing to Mac-1** (replace `<N>` with the index from step 3):
    ```powershell
-   .venv\Scripts\python tools\stream_test.py push http://10.247.46.145:8095 --cam camB --source <N>
+   .venv\Scripts\python tools\stream_test.py push http://10.247.206.87:8095 --cam camB --source <N>
    ```
    - **Success:** about every 5 s it prints `~30 fps sent, ~200 KB/frame`. Lower fps (15+) is still fine.
-   - Mac-1 is at `10.247.46.145` on the venue Wi-Fi. If that fails, ask Szymon for Mac-1's current IP
-     (on Mac-1: `python tools/lan_ip.py`).
+   - The server computer is at `10.247.206.87` on the venue Wi-Fi. If that fails, check its current IP
+     (`python tools/lan_ip.py` on the server computer).
 
 ## Calibrate camB (on this laptop, camera plugged in here, `<N>` from step 3)
 Stop the push (Ctrl+C) first: only one program can use the camera at a time.
