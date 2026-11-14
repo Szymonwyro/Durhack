@@ -1,5 +1,7 @@
-// Canvas-texture text, redrawn only when the text changes.
+// Canvas-texture text, redrawn only when the content changes.
 import * as THREE from 'three';
+
+export const css = (hex) => '#' + hex.toString(16).padStart(6, '0');
 
 export class CanvasText {
   constructor(w, h) {
@@ -12,25 +14,36 @@ export class CanvasText {
     this.key = null;
   }
 
-  // lines: array of strings; colour as a css string
-  draw(lines, color = '#00E5FF', bg = 'rgba(0,0,0,0.65)') {
-    const key = lines.join('\n') + color;
+  // lines of text, dark rounded background, coloured border
+  draw(lines, { color = '#00E5FF', bg = 'rgba(0,0,0,0.72)', center = false } = {}) {
+    const key = lines.join('\n') + color + center;
     if (key === this.key) return;
     this.key = key;
     const { ctx, canvas } = this;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.roundRect(3, 3, W - 6, H - 6, 14);
+    ctx.fill();
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
-    const lh = Math.floor((canvas.height - 12) / Math.max(lines.length, 1));
-    ctx.font = `bold ${Math.floor(lh * 0.78)}px sans-serif`;
+    ctx.stroke();
+    const lh = Math.floor((H - 12) / Math.max(lines.length, 1));
+    ctx.font = `bold ${Math.floor(lh * 0.72)}px sans-serif`;
     ctx.fillStyle = color;
     ctx.textBaseline = 'middle';
-    lines.forEach((s, i) => ctx.fillText(s, 14, 6 + lh * (i + 0.5)));
+    ctx.textAlign = center ? 'center' : 'left';
+    lines.forEach((s, i) => ctx.fillText(s, center ? W / 2 : 16, 6 + lh * (i + 0.5), W - 24));
     this.texture.needsUpdate = true;
   }
 }
 
-export const css = (hex) => '#' + hex.toString(16).padStart(6, '0');
+// a camera-facing text sprite of the given world width (m)
+export function textSprite(w, h, widthM) {
+  const text = new CanvasText(w, h);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: text.texture, transparent: true, depthTest: false }));
+  sprite.scale.set(widthM, (widthM * h) / w, 1);
+  sprite.renderOrder = 20;
+  return { text, sprite };
+}

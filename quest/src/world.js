@@ -1,61 +1,87 @@
-// Static map content: walls (cyan outlines), origin cross (orange), alignment-point crosses, cameras.
+// Map content from /world: calibration corners (cyan crosses + IDs), objects (labelled outlines),
+// and, only with ?debug=1, walls and cameras. All under mapRoot.
 import * as THREE from 'three';
-import { COLORS, ALIGN_POINTS } from './config.js';
+import { COLORS, DEBUG } from './config.js';
 import { mapRoot, mapToThree } from './frames.js';
+import { textSprite, css } from './label.js';
 
-const group = new THREE.Group();
-group.name = 'world';
-mapRoot.add(group);
+const debugGroup = new THREE.Group();
+const cornerGroup = new THREE.Group();
+const objectGroup = new THREE.Group();
+mapRoot.add(debugGroup, cornerGroup, objectGroup);
+
+let current = { walls: [], cameras: [], zones: [], objects: [], align_points: [] };
+export const getWorld = () => current;
 
 const v = (xy, z = 0) => mapToThree(xy, z);
 
+function clear(g) {
+  for (const c of [...g.children]) {
+    g.remove(c);
+    c.geometry?.dispose();
+    if (c.material) { c.material.map?.dispose(); c.material.dispose(); }
+  }
+}
+
 function lines(points, color, opts = {}) {
-  const geom = new THREE.BufferGeometry().setFromPoints(points);
-  return new THREE.LineSegments(geom, new THREE.LineBasicMaterial({ color, ...opts }));
+  return new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color, ...opts }));
 }
-
-// flat cross on the floor centred at map xy, arms of half-length r
-function crossPoints(xy, r, out) {
-  const z = 0.005;
-  out.push(v([xy[0] - r, xy[1]], z), v([xy[0] + r, xy[1]], z));
-  out.push(v([xy[0], xy[1] - r], z), v([xy[0], xy[1] + r], z));
-}
-
-let current = { walls: [], cameras: [], zones: [] };
-export const getWorld = () => current;
 
 export function buildWorld(world) {
-  current = { walls: world.walls || [], cameras: world.cameras || [], zones: world.zones || [] };
-  for (const c of [...group.children]) { group.remove(c); c.geometry.dispose(); c.material.dispose(); }
+  current = world;
+  clear(debugGroup);
+  clear(objectGroup);
 
-  // walls: rectangle outline in the wall plane + a mid rail, all in one draw call
+  // debug: walls (outline + mid rail) and cameras
   const w = [];
-  for (const { a, b, h = 2.0 } of current.walls) {
-    w.push(v(a), v(b), v(b), v(b, h), v(b, h), v(a, h), v(a, h), v(a));
-    w.push(v(a, h / 2), v(b, h / 2));
+  for (const { a, b, h } of world.walls) {
+    w.push(v(a), v(b), v(b), v(b, h), v(b, h), v(a, h), v(a, h), v(a), v(a, h / 2), v(b, h / 2));
   }
-  if (w.length) group.add(lines(w, COLORS.wall));
-
-  // origin (corner marker ID 1)
-  const o = [];
-  crossPoints([0, 0], 0.25, o);
-  group.add(lines(o, COLORS.origin));
-
-  // alignment points (skip the origin, already drawn)
-  const p = [];
-  for (const { pos } of ALIGN_POINTS) if (pos[0] || pos[1]) crossPoints(pos, 0.12, p);
-  if (p.length) group.add(lines(p, COLORS.alignPoint));
-
-  // cameras: a short view direction + field-of-view edges at camera height
+  if (w.length) debugGroup.add(lines(w, COLORS.wall, { transparent: true, opacity: 0.5 }));
   const c = [];
-  for (const cam of current.cameras) {
-    const [x, y, z = 1.5] = cam.pos;
-    const yaw = THREE.MathUtils.degToRad(cam.yaw || 0);
-    const half = THREE.MathUtils.degToRad((cam.fov || 60) / 2);
+  for (const cam of world.cameras) {
+    const [x, y, z] = cam.pos;
+    const yaw = THREE.MathUtils.degToRad(cam.yaw || 0), half = THREE.MathUtils.degToRad((cam.fov || 60) / 2);
     const at = (ang, len) => v([x + len * Math.cos(ang), y + len * Math.sin(ang)], z);
-    c.push(v([x, y], z), at(yaw, 0.4));
-    c.push(v([x, y], z), at(yaw - half, 0.3), v([x, y], z), at(yaw + half, 0.3));
-    c.push(v([x, y], 0), v([x, y], z)); // pole down to the floor
+    c.push(v([x, y], z), at(yaw, 0.4), v([x, y], z), at(yaw - half, 0.3), v([x, y], z), at(yaw + half, 0.3), v([x, y], 0), v([x, y], z));
   }
-  if (c.length) group.add(lines(c, COLORS.alignPoint, { transparent: true, opacity: 0.6 }));
+  if (c.length) debugGroup.add(lines(c, 0xffffff, { transparent: true, opacity: 0.5 }));
+
+  // objects: box outline (w along map x, d along map y, h up) + label
+  for (const o of world.objects) {
+    const [bw, bd, bh] = o.size;
+    const color = COLORS.object[o.type] ?? COLORS.object.other;
+    const geom = new THREE.EdgesGeometry(new THREE.BoxGeometry(bw, bh, bd));
+    geom.translate(0, bh / 2, 0);
+    const box = new THREE.LineSegments(geom, new THREE.LineBasicMaterial({ color }));
+    mapToThree(o.pos, 0, box.position);
+    objectGroup.add(box);
+    const { text, sprite } = textSprite(384, 80, 0.5);
+    text.draw([o.label || o.type], { color: css(color), center: true });
+    mapToThree(o.pos, bh + 0.15, sprite.position);
+    objectGroup.add(sprite);
+  }
+}
+
+// calibration corners: small cyan floor crosses with the marker ID
+export function buildCorners(points) {
+  clear(cornerGroup);
+  const p = [], r = 0.1, z = 0.004;
+  for (const { pos } of points) {
+    p.push(v([pos[0] - r, pos[1]], z), v([pos[0] + r, pos[1]], z), v([pos[0], pos[1] - r], z), v([pos[0], pos[1] + r], z));
+  }
+  cornerGroup.add(lines(p, COLORS.corner));
+  points.forEach((ap, i) => {
+    const { text, sprite } = textSprite(128, 96, 0.12);
+    text.draw([String(ap.marker ?? i)], { color: css(COLORS.corner), center: true });
+    mapToThree([ap.pos[0] + 0.12, ap.pos[1] + 0.12], 0.08, sprite.position);
+    cornerGroup.add(sprite);
+  });
+}
+
+export function setLayers({ corners, objects }) {
+  cornerGroup.visible = corners;
+  objectGroup.visible = objects;
+  debugGroup.visible = DEBUG && corners; // only meaningful once aligned
 }

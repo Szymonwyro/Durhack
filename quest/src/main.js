@@ -1,13 +1,15 @@
-// Quest 2 WebXR viewer entry point.
+// Quest 2 WebXR viewer entry point: passthrough AR, calibration by touching corner markers,
+// people from /tracks as floor-locked boxes. Live by default; ?mock=1 for fake data; ?debug=1 for stats.
 import * as THREE from 'three';
-import { MOCK } from './config.js';
+import { MOCK, DEBUG, DATA_TIMEOUT_S, FADE_S } from './config.js';
 import { mapRoot, worldToMap } from './frames.js';
-import { buildWorld, getWorld } from './world.js';
-import { onTracksMsg, updateTracks, trackStats } from './tracks.js';
+import { buildWorld, buildCorners, setLayers, getWorld } from './world.js';
+import { buildZones, updateZones } from './zones.js';
+import { tracksGroup, onTracksMsg, updateTracks, trackCount } from './tracks.js';
 import { attachHud, updateHud } from './hud.js';
-import { initAlign, loadAlignment, updateAlign, alignStatus } from './align.js';
+import { initAlign, setWorld as alignSetWorld, getPoints, getState, getFit, updateAlign } from './align.js';
+import { createFeed, startNet, invalidCounts } from './net.js';
 import { startMock } from './mock.js';
-import { startLive } from './source.js';
 
 const enterBtn = document.getElementById('enter');
 const statusEl = document.getElementById('status');
@@ -25,26 +27,36 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
-scene.add(camera); // so the head-locked HUD (a child of camera) renders
+scene.add(camera); // head-locked panels are children of the camera
 scene.add(mapRoot);
 attachHud(camera);
-initAlign(renderer, scene);
-loadAlignment();
+initAlign(renderer, scene, camera);
+alignSetWorld({ world_version: 0, align_points: [] }); // fallback corners until /world arrives
+buildCorners(getPoints());
 
 window.addEventListener('resize', () => {
+  if (renderer.xr.isPresenting) return; // XR owns the size while presenting
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// --- data source ---
-let srcStatus = '';
-const handlers = {
-  onWorld: (w) => { buildWorld(w); console.log('[world]', w.walls.length, 'walls', (w.cameras || []).length, 'cameras'); },
-  onTracks: onTracksMsg,
-  onStatus: (s) => { srcStatus = s; console.log('[source]', s); },
-};
-if (MOCK) startMock(handlers); else startLive(handlers);
+// --- data ---
+let netStatus = MOCK ? 'mock' : 'connecting';
+let pirZones = [];
+const feed = createFeed({
+  onWorld: (w, info) => {
+    buildWorld(w);
+    buildZones(w.zones);
+    alignSetWorld(w, info);
+    buildCorners(getPoints());
+    console.log('[world] v' + w.world_version, w.walls.length, 'walls,', w.objects.length, 'objects,',
+      w.zones.length, 'zones,', w.align_points.length, 'align points');
+  },
+  onTracks: (m) => { onTracksMsg(m); pirZones = m.zones; },
+});
+if (MOCK) startMock(feed);
+else startNet(feed, (s) => { netStatus = s; console.log('[net]', s); });
 
 // --- enter AR (own button: three's ARButton forces the 'local' reference space) ---
 const sessionInit = { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking', 'anchors'] };
@@ -54,9 +66,7 @@ async function checkSupport() {
   if (!window.isSecureContext) return 'Not a secure context. Open via http://localhost:8001 (adb reverse) or https.';
   if (!navigator.xr) return 'WebXR is not available in this browser (use the Quest browser).';
   try {
-    if (!(await navigator.xr.isSessionSupported('immersive-ar'))) {
-      return 'immersive-ar (passthrough AR) is not supported on this device/browser.';
-    }
+    if (!(await navigator.xr.isSessionSupported('immersive-ar'))) return 'immersive-ar (passthrough AR) is not supported here.';
   } catch (e) {
     return 'isSessionSupported failed: ' + e;
   }
@@ -91,17 +101,32 @@ renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000;
   const dt = Math.min(now - last, 0.1);
   last = now;
+  const presenting = renderer.xr.isPresenting;
 
-  updateAlign();
+  updateAlign(now, presenting);
+  const st = getState(), aligned = st === 'aligned';
+
+  // data freshness: > 1 s without /tracks -> fade over 1 s -> idle
+  const age = feed.dataAge();
+  const fade = Math.min(1, Math.max(0, 1 - (age - DATA_TIMEOUT_S) / FADE_S));
+
+  setLayers({ corners: aligned || st === 'review', objects: aligned && fade > 0 });
+  tracksGroup.visible = aligned;
+
   camera.getWorldPosition(headWorld);
-  const head = renderer.xr.isPresenting ? worldToMap(headWorld) : null;
-  updateTracks(dt, head, getWorld().walls);
+  const head = presenting ? worldToMap(headWorld) : null;
+  updateTracks(dt, head, getWorld().walls, fade, feed.serverNow());
+  updateZones(aligned ? pirZones : [], now, fade);
 
-  const al = alignStatus();
-  const ts = trackStats();
-  updateHud(now, {
-    mode: MOCK ? 'mock' : 'live', align: al.text, prompt: al.prompt, warn: al.warn,
-    age: ts.age, count: ts.count, status: srcStatus,
-  });
+  if (DEBUG) {
+    const fit = getFit();
+    const nBad = Object.values(invalidCounts).reduce((s, n) => s + n, 0);
+    updateHud(now, [
+      `${MOCK ? 'mock' : 'live'} · ${netStatus}`.slice(0, 34),
+      `align ${st}${fit ? ' ' + Math.round(fit.rms * 100) + 'cm' : ''} · wv ${feed.worldVersion() ?? '-'}`,
+      `age ${Number.isFinite(age) ? age.toFixed(2) : '-'}s · tracks ${trackCount()}`,
+      `clock ${feed.clockOffset().toFixed(2)}s · bad ${nBad}`,
+    ]);
+  }
   renderer.render(scene, camera);
 });
