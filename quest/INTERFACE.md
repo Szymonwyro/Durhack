@@ -40,17 +40,21 @@ Also sent as the first message on /tracks connect, wrapped as `{"type":"world", 
   "objects": [{"id":"exit1", "type":"exit", "pos":[6.0,0.5], "size":[0.9,0.1,2.0], "label":"Fire exit"}],
   "align_points": [
     {"id":"m0", "marker":0, "pos":[0.0,0.0]},
-    {"id":"m1", "marker":1, "pos":[2.5,0.0]}
+    {"id":"m1", "marker":1, "pos":[4.0,0.0]},
+    {"id":"m2", "marker":2, "pos":[4.0,3.0]},
+    {"id":"m3", "marker":3, "pos":[0.0,3.0]}
   ]
 }
 ```
 
 - `walls`: every real wall/partition the demo cares about, measured in the world frame. The Quest uses these for its own hidden-vs-visible test, so they must match the real walls to ~5 cm.
 - `objects` NEW: `type` is one of `exit | door | hazard | furniture | other`; `size` = [w, d, h] m.
-- `align_points` NEW (Role 3, from calibration): map positions of the CENTRES of the markers the wearer will touch. At least 2, ideally 3. Rules:
+- `align_points` NEW (Role 3, from calibration): map positions of the CENTRES of the FOUR floor markers (the corners of the tracked area) that the wearer touches to align the headset. The numbers above are placeholders. Rules:
+  - exactly the 4 markers used for camera calibration, listed in touch order (0, 1, 2, 3, going round the area), with their real measured positions in the world frame;
   - flat on the floor, taped down, never moved after calibration;
-  - at least 2 m apart, all reachable on foot, not under furniture;
-  - include marker 0 at [0,0].
+  - spread as far apart as the room allows, all reachable on foot, not under furniture;
+  - marker 0 at [0,0].
+  - The Quest draws these 4 corners permanently, so they must match the physical markers to ~3 cm.
 - `world_version`: increment whenever any of the above changes; the Quest re-fetches on change.
 
 ## 3. WS /tracks (Role 2) — needed by 19:00
