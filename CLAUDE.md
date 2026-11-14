@@ -13,44 +13,72 @@ PIR sensor in the blind spot and an LED-matrix radar. Pitch framing: shared situ
 awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in the product.
 
 ## Hardware we have
-- 2x MacBook (Mac-1 = server + camera A; Mac-2 = camera C / dev)
-- 1x Windows PC (Quest dev via Meta Quest Developer Hub / adb, audience map display)
+- 2x MacBook (Mac-1 = server + camera A + Quest dev/debug over adb; Mac-2 = camera C / dev)
+- 1x Windows PC (optional: big-screen command map display and/or an extra camera worker with a
+  USB camera; not part of the Quest workflow)
 - 1x Meta Quest 2 (viewer; passthrough is GREYSCALE, so use bright cyan/orange visuals)
 - 1x Arduino UNO Q (Debian Linux on Qualcomm QRB2210 + STM32U585 MCU, Wi-Fi,
   8x13 LED matrix, 3.3V headers, set up via Arduino App Lab; Python on the Linux side,
   sketch on the MCU, joined by the Bridge)
 - USB cameras + accessories, breadboard, jumper wires, basic electronics
   (PIR, buzzer, LEDs, resistors as available)
-- Phones (fallback viewer, casting the Quest view)
+- iPhones (all team phones): Personal Hotspot, fallback 2D AR viewer (no WebXR on iOS),
+  Quest casting via the Meta Horizon app, optional Continuity Camera webcam
 - Printed ArUco markers (DICT_4X4_50, 180 mm, ID 0 = world origin flat on floor), chessboard (9x6, 25 mm)
 - No travel router (see Networking)
 
 ## Networking (no router)
 - **First check:** venue Wi-Fi may block device-to-device traffic (client isolation). Run
-  `tools/net_check.py <server_url>` from another device before relying on it.
-- **Primary:** one phone's personal hotspot (or Windows Mobile Hotspot); all devices join it.
-  iPhone hotspot ≈5 devices max: Mac-1, Mac-2, Quest, UNO Q (+ Windows if room). Keep the phone charging.
+  `tools/net_check.py <server_url>` from another device before relying on it
+  (on an iPhone: open `<server>/world` in Safari).
+- **Primary if venue Wi-Fi fails:** an iPhone Personal Hotspot; all devices join it.
+  ~5 device limit: Mac-1, Mac-2, Quest, UNO Q (Windows only if room). Keep that iPhone charging.
+  If a device can't see or join it, turn on "Maximize Compatibility" (forces 2.4 GHz).
   After joining (and every time the hotspot changes): `tools/make_certs.sh` on Mac-1, then set
   `lan_url` in config/server.json.
 - **Fallback:** cloudflared quick tunnel on Mac-1 (`tools/tunnel.sh`) → public https URL with a
   valid cert, works from any network, adds ~50-150 ms (fine for detections/tracks, not video).
   It writes `tunnel_url` into config/server.json; the URL changes on every run.
-- **Quest dev:** USB + `adb reverse tcp:8000 tcp:8000` (`tools/quest_usb.sh`) → http://localhost:8000
-  (secure context, no cert needed). Caveat: a server running TLS on 8000 doesn't answer plain http,
-  so use https://localhost:8000 (accept the cert once) or serve plain HTTP for the Quest.
+- **Quest:** USB/wireless adb from Mac-1 → http://localhost:8001 (see "Quest dev & debugging").
+- **iPhones + certs:** on iOS, tapping through a self-signed warning can still break wss://
+  WebSockets. Use (a) the tunnel URL (real cert), or (b) mkcert's root CA installed and fully
+  trusted on each iPhone: `tools/iphone_cert_help.sh` prints the file and the steps.
 - **Server URL:** all clients read it from config/server.json
-  (`{"mode":"lan|tunnel|usb","lan_url":...,"tunnel_url":...,"usb_url":...}`) or the SERVER_URL env var,
-  via `config/server_url.py` (Python) / `config/server_url.js` (browser; `?server=` / `?mode=` override).
-  Never hard-code IPs: they change every time we switch network.
+  (`{"mode":"lan|tunnel|usb","lan_url":"https://<ip>:8000","tunnel_url":"","usb_url":"http://localhost:8001"}`)
+  or the SERVER_URL env var, via `config/server_url.py` (Python) / `config/server_url.js`
+  (browser; `?server=` / `?mode=` override). Never hard-code IPs: they change every time we switch network.
+
+## Quest dev & debugging (Mac-1, not Windows)
+- adb: `brew install android-platform-tools` on Mac-1. Meta Quest Developer Hub for macOS is optional.
+- Setup: Developer Mode in the Meta Horizon iPhone app → Quest to Mac-1 with a USB-C DATA cable →
+  accept "Allow USB debugging" (always allow) in the headset → `adb devices` lists it.
+- Serving: the server runs HTTPS on :8000 and plain HTTP on :8001 bound to 127.0.0.1.
+  `tools/quest_usb.sh` runs `adb reverse tcp:8001 tcp:8001` → open http://localhost:8001/quest/
+  in the Quest browser (a secure context for WebXR, so no cert is needed).
+- Wireless: `tools/quest_usb.sh --wireless` (after USB: `adb tcpip 5555` + `adb connect <quest-ip>:5555`;
+  same network only).
+- Debugging: Chrome on Mac-1 → chrome://inspect → the Quest browser's tabs + console.
+- Audience view: cast from the Quest to oculus.com/casting in a Mac browser, or to the Meta Horizon iPhone app.
+- Quest Link / Air Link are Windows-only and NOT needed: WebXR runs in the headset browser.
+
+## iPhones (all team phones)
+- Hotspot: see Networking.
+- **iOS Safari has NO WebXR.** The iPhone fallback viewer is a 2D AR overlay (getUserMedia camera +
+  canvas overlay from the server) in web/viewer/, owned by Role 1 as the Quest fallback.
+- Certs: see Networking (tunnel URL or mkcert root CA; self-signed can break wss://).
+- Extra camera: Continuity Camera turns an iPhone into a webcam for a Mac (mount it landscape,
+  locked, near the Mac). While attached it SHIFTS OpenCV camera indices, so cameras MUST be chosen
+  by name/resolution via config/cameras.json. Option for camera C: iPhone via Continuity Camera on Mac-2.
 
 ## Device roles
 | Device | Runs |
 |---|---|
-| Mac-1 | fusion server (FastAPI, HTTPS), camera A worker |
+| Mac-1 | fusion server (FastAPI, HTTPS :8000 + HTTP :8001 on 127.0.0.1 for the Quest), camera A worker, Quest dev/debug (adb, chrome://inspect) |
 | UNO Q + USB cam | camera B (behind wall) worker, PIR blind-spot sensor, LED radar |
-| Mac-2 | camera C worker (fixed, taped down after calibration) |
-| Windows | Quest dev + command map on a big screen |
-| Quest 2 | WebXR immersive-ar viewer |
+| Mac-2 | camera C worker: USB cam or an iPhone via Continuity Camera (fixed, taped down after calibration) |
+| Windows (optional) | big-screen command map and/or an extra camera worker with a USB camera |
+| Quest 2 | WebXR immersive-ar viewer in the headset browser |
+| iPhones | Personal Hotspot, fallback 2D AR viewer (web/viewer/), casting display |
 
 ## World frame (fixed — do not change without telling the team)
 ArUco ID 0 flat on the floor = origin. Metres. x,y on the floor, z up. Person height 1.75 m.
@@ -69,14 +97,15 @@ ArUco ID 0 flat on the floor = origin. Metres. x,y on the floor, z up. Person he
   through the walls), not by the server.
 
 ## Repo ownership — only edit your own folders unless asked
-- Role 1 (Quest):        quest/
+- Role 1 (Quest):        quest/, web/viewer/ (iPhone fallback viewer)
 - Role 2 (Detection+Map): perception/, fusion/, web/map/
 - Role 3 (Cameras+Lead):  calib/, edge/ (UNO Q), config/, tools/, docs/, README
 Shared: CLAUDE.md, docs/CONTRACTS.md — change only after telling the team.
 
 ## Conventions
 - Server URL comes from config/server.json (or the SERVER_URL env var); never hard-code IPs.
-- Identify cameras by name in config/cameras.json, never by OpenCV index alone (indices shift).
+- Identify cameras by name in config/cameras.json, never by OpenCV index alone (indices shift,
+  e.g. when an iPhone attaches via Continuity Camera).
 - No video, weights or certs in git. Recordings go in recordings/ (gitignored).
 - Small commits to main, often. Prefix messages with role: "[r2] kalman update step".
 - Prefer simple, readable Python/JS. A working demo matters more than perfect code.
@@ -90,6 +119,8 @@ Shared: CLAUDE.md, docs/CONTRACTS.md — change only after telling the team.
 - 09:00+ rehearse 5x, backup video, Devpost
 
 ## Fallbacks
-- Quest passthrough fails → Quest shows a VR replica of the room; phone becomes the AR viewer
+- Quest passthrough fails → Quest shows a VR replica of the room; an iPhone becomes the AR viewer
+  via web/viewer/: 2D AR overlay (getUserMedia camera + canvas overlay from the server), NOT WebXR
+  (iOS Safari doesn't support it)
 - UNO Q too slow for detection (<2 fps) → it streams frames to Mac-1 for detection; keeps PIR + LEDs
 - ID swaps between people → demo with one person in a bright top

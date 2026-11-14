@@ -25,11 +25,12 @@ python tools/test_yolo.py      # yolo11n on camera 0 (or a sample image)
 python tools/test_aruco.py 0 30  # print marker IDs seen by cam 0 for 30 s
 python tools/net_check.py https://<ip>:8000  # DNS / TCP / GET /world / WS /tracks
 tools/tunnel.sh                # fallback: public cloudflared URL -> config/server.json
-tools/quest_usb.sh             # Quest over USB: adb reverse -> http://localhost:8000
+tools/quest_usb.sh [--wireless] # Quest from Mac-1: adb reverse -> http://localhost:8001/quest/
+tools/iphone_cert_help.sh      # how iPhones trust the server cert (mkcert CA / tunnel)
 ```
 On macOS, grant camera access to your terminal app first: **System Settings → Privacy & Security → Camera**. Then restart the terminal.
 
-## HTTPS for phones
+## HTTPS for iPhones (and the Quest)
 Mobile browsers only allow `getUserMedia` (camera) over HTTPS, except on localhost.
 
 **Re-run `tools/make_certs.sh` on the venue Wi-Fi.** The certs include the LAN IP, which changes from network to network.
@@ -43,14 +44,14 @@ uvicorn fusion.server:app --host 0.0.0.0 --port 8000 \
   --ssl-keyfile certs/key.pem --ssl-certfile certs/cert.pem
 #  (or certs/selfsigned-key.pem / certs/selfsigned.pem)
 ```
-Phones open `https://<LAN_IP>:8000/` (from `tools/lan_ip.py`). Phone and laptop must be on the same network. Venue Wi-Fi often blocks device-to-device traffic, so check it with `tools/net_check.py`. If it fails, use a phone hotspot, or `tools/tunnel.sh` as a fallback. See the Networking section in CLAUDE.md.
+For the Quest, the server also serves plain HTTP on `127.0.0.1:8001`, which `tools/quest_usb.sh` exposes via `adb reverse`. See CLAUDE.md, "Quest dev & debugging".
+Phones open `https://<LAN_IP>:8000/` (from `tools/lan_ip.py`). Phone and laptop must be on the same network. Venue Wi-Fi often blocks device-to-device traffic, so check it with `tools/net_check.py`. If it fails, use an iPhone Personal Hotspot, or `tools/tunnel.sh` as a fallback. See the Networking section in CLAUDE.md.
 
 Accepting the cert:
-- **Self-signed, Android/Chrome:** "Your connection is not private" → Advanced → Proceed.
-- **Self-signed, iPhone/Safari:** "This connection is not private" → Show Details → visit this website → Visit Website.
-- **mkcert (no warnings):** AirDrop or send `$(mkcert -CAROOT)/rootCA.pem` to the phone.
+- **Self-signed, iPhone/Safari:** you can tap through the warning (Show Details → visit this website), but wss:// WebSockets may still fail. Don't rely on it.
+- **Tunnel (`tools/tunnel.sh`):** a real cert, so nothing to install on the phone.
+- **mkcert (no warnings):** run `tools/iphone_cert_help.sh`. It covers AirDropping `$(mkcert -CAROOT)/rootCA.pem` to the iPhone.
   - **iOS:** install the profile (Settings → Profile Downloaded → Install), then enable it under Settings → General → About → Certificate Trust Settings.
-  - **Android:** Settings → Security → Encryption & credentials → Install a certificate → CA certificate.
 - Websockets have to use `wss://` on the same host:port as the page.
 
 ## Printing
@@ -76,10 +77,10 @@ printables/  PDFs     weights/  recordings/  certs/  (git-ignored except printab
 - [ ] Extension lead
 - [ ] USB hub
 - [ ] Long USB cables
-- [ ] 3-4 USB webcams or spare phones + clamps/tripods
-- [ ] Viewer phone
-- [ ] Phone for the hotspot + its charging cable
-- [ ] USB-C data cable for the Quest (adb)
+- [ ] 3-4 USB webcams (+ iPhones for Continuity Camera) + clamps/tripods
+- [ ] Meta Quest 2 + charger; an iPhone as the fallback viewer
+- [ ] iPhone for the hotspot + its charging cable
+- [ ] USB-C DATA cable for Quest ↔ Mac-1 (adb)
 - [ ] Gaffer tape
 - [ ] Tape measure
 - [ ] Printed markers + chessboard (scale verified)

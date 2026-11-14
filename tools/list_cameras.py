@@ -1,5 +1,7 @@
 """Smoke test: enumerate camera indices 0-5 and print resolution/FPS of each that opens.
-On macOS the first run triggers a camera permission prompt for your terminal app."""
+On macOS the first run triggers a camera permission prompt for your terminal app.
+An iPhone attached via Continuity Camera shows up as an extra camera and SHIFTS the indices,
+so choose cameras by name/resolution in config/cameras.json, never by index alone."""
 import time
 
 import cv2

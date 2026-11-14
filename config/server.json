@@ -2,5 +2,5 @@
   "mode": "lan",
   "lan_url": "https://<ip>:8000",
   "tunnel_url": "",
-  "usb_url": "http://localhost:8000"
+  "usb_url": "http://localhost:8001"
 }

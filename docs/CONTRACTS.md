@@ -16,6 +16,7 @@ Shared file: change it only after telling the team. If this file and CLAUDE.md d
 | `wss://<server>/tracks` | server → all clients, ~15 Hz | `tracks` (and `world` on connect) |
 | `GET https://<server>/world` | clients | `world` |
 
+Mac-1 also serves the same endpoints over plain HTTP on `127.0.0.1:8001`, which the Quest reaches via `adb reverse`.
 The server URL comes from `config/server.json` or the `SERVER_URL` env var. Never hard-code IPs.
 
 ## Messages (JSON)

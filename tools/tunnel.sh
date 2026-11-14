@@ -34,7 +34,7 @@ python3 - "$URL" <<'PY'
 import json, sys
 from pathlib import Path
 p = Path("config/server.json")
-cfg = json.loads(p.read_text()) if p.exists() else {"mode": "lan", "lan_url": "", "usb_url": "http://localhost:8000"}
+cfg = json.loads(p.read_text()) if p.exists() else {"mode": "lan", "lan_url": "", "usb_url": "http://localhost:8001"}
 cfg["tunnel_url"] = sys.argv[1]
 p.write_text(json.dumps(cfg, indent=2) + "\n")
 PY

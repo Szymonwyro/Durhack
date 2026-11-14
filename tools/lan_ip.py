@@ -1,4 +1,4 @@
-"""Print this machine's LAN IP (for phones to connect to)."""
+"""Print this machine's LAN IP (for iPhones / the Quest / other devices to connect to)."""
 import socket
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -10,4 +10,4 @@ except OSError:
 finally:
     s.close()
 print(ip)
-print(f"phones: https://{ip}:8000/")
+print(f"other devices: https://{ip}:8000/")

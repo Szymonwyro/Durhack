@@ -5,7 +5,7 @@
 //   const base = await loadServerUrl();          // e.g. https://172.20.10.3:8000
 //   const ws = new WebSocket(wsUrl(base, "/tracks"));
 //
-// Per-device mode without editing the shared file: ?mode=usb (Quest over adb reverse) or ?mode=tunnel.
+// Per-device mode without editing the shared file: ?mode=usb (Quest over adb reverse, http://localhost:8001) or ?mode=tunnel.
 
 export function pickServerUrl(cfg, mode = cfg.mode || "lan") {
   const url = (cfg[`${mode}_url`] || "").trim();

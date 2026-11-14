@@ -6,7 +6,8 @@ Usage:  python tools/net_check.py [server_url]
 
 Checks, in order: DNS -> TCP connect -> HTTPS GET /world -> WebSocket upgrade on /tracks.
 Also prints this machine's LAN IPs. Exit code 0 only if every check passes.
-Quest: it can't run Python, so open <server_url>/world in the Quest browser instead.
+Quest / iPhone: they can't run this, so open <server_url>/world in the Quest browser / iPhone Safari
+instead. Seeing the JSON means DNS, TCP and HTTPS work. For iPhones, also see tools/iphone_cert_help.sh.
 """
 import base64
 import json

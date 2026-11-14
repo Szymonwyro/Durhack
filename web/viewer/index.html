@@ -1,4 +1,5 @@
 <!doctype html>
-<!-- TODO (D): viewer AR app (mobile, HTTPS required for camera). Styles: solid / ghost / predicted,
-     ghost clipped to wall outline. Consumes overlay messages (docs/CONTRACTS.md). Write during the event. -->
+<!-- TODO (Role 1): iPhone fallback viewer for when the Quest fails. 2D AR overlay = getUserMedia camera +
+     canvas overlay from the server. NOT WebXR (iOS Safari doesn't support it). Needs a trusted cert for
+     wss:// (tunnel URL or mkcert CA, see tools/iphone_cert_help.sh). Write during the event. -->
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Viewer</title></head><body></body></html>
