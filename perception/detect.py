@@ -12,9 +12,10 @@ import argparse
 from collections.abc import Iterator, Sequence
 import json
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 import cv2
+import numpy as np
 
 
 class Detection(TypedDict):
@@ -40,11 +41,14 @@ def detect_video(
     confidence: float = 0.25,
     classes: Sequence[int] | None = None,
     device: str | None = None,
+    on_frame: Callable[[np.ndarray, FrameDetections], bool] | None = None,
 ) -> Iterator[FrameDetections]:
     """Yield per-frame object detections; positions are pixels, not world coordinates.
 
     ``video_source`` may be a video path, stream URL, or camera index. If the
     model file is not present locally, Ultralytics may download it by name.
+    ``on_frame``, when provided, receives each source frame and its detections;
+    return False from it to stop after the current frame.
     """
     if not 0 <= confidence <= 1:
         raise ValueError("confidence must be between 0 and 1")
@@ -97,14 +101,18 @@ def detect_video(
                     }
                 )
 
-            yield {
+            frame_result: FrameDetections = {
                 "frame": frame_index,
                 "time_seconds": time_seconds,
                 "width": frame_width,
                 "height": frame_height,
                 "detections": detections,
             }
+            should_continue = on_frame(frame, frame_result) if on_frame is not None else True
+            yield frame_result
             frame_index += 1
+            if not should_continue:
+                break
     finally:
         capture.release()
 
