@@ -5,9 +5,11 @@
 
 Needs K/dist for the camera first (calib/intrinsics.py) and marker positions in config/markers.json.
 The camera must be FIXED (taped down) before running this. Moving it afterwards means re-running.
-Ideally 2+ corner markers in view; more = better. One marker alone works but can be ambiguous/flip.
+Best: all 4 corner markers in view. Then only marker CENTRES are used (sheet rotation doesn't matter) and,
+on save, each sheet's measured rotation is written to markers.json. Cameras that see only 1-3 markers then
+use the corners with those rotations, so calibrate a camera that sees all 4 FIRST. One marker alone works but can be ambiguous/flip.
 Markers: only the corner markers 1, 3, 5, 7 in config/markers.json (ID 1 = origin). Other IDs are ignored (drawn red).
-Check: the drawn world axes sit on marker ID 1 (x red towards ID 3, y green towards ID 7, z blue up), the reprojected
+Check: the drawn world axes sit on marker ID 1 (x red towards ID 7, y green towards ID 5, z blue up), the reprojected
 outlines (magenta) sit on the real markers, error < ~3 px, and the camera height looks right.
 """
 import argparse
@@ -49,27 +51,45 @@ def detect(detector, frame):
 
 
 def solve(seen, world, K, dist):
-    """seen: {id: 4x2 image corners}; world: {id: 4x3}. Returns dict with R, t, errors... or None."""
+    """seen: {id: 4x2 image corners}; world: {id: 4x3}. Returns dict with R, t, errors... or None.
+
+    With all 4+ known markers in view it uses marker CENTRES only, so how each sheet is rotated on the floor
+    doesn't matter (yaw_deg ignored). With fewer it needs all corners, so yaw_deg must be right
+    (measure_yaws() fills it in from a 4-marker solve). 3 centres alone are ambiguous, so never used.
+    """
     ids = [i for i in seen if i in world]
     if not ids:
         return None
-    obj = np.concatenate([world[i] for i in ids])
-    img = np.concatenate([seen[i] for i in ids]).astype(np.float64)
-    n, rvecs, tvecs, errs = cv2.solvePnPGeneric(obj, img, K, dist, flags=cv2.SOLVEPNP_IPPE)
-    if not n:
-        return None
-    rvec, tvec = rvecs[0], tvecs[0]
-    errs = np.asarray(errs).ravel()
-    ambiguous = n > 1 and errs[1] < 1.5 * errs[0] and len(ids) == 1
+    ambiguous = False
+    if len(ids) >= 4:
+        mode = "centres"
+        obj = np.array([world[i].mean(axis=0) for i in ids], np.float64)
+        img = np.array([seen[i].mean(axis=0) for i in ids], np.float64)
+        ok, rvec, tvec = cv2.solvePnP(obj, img, K, dist, flags=cv2.SOLVEPNP_SQPNP)
+        if not ok:
+            return None
+    else:
+        mode = "corners (needs correct yaw_deg)"
+        obj = np.concatenate([world[i] for i in ids])
+        img = np.concatenate([seen[i] for i in ids]).astype(np.float64)
+        n, rvecs, tvecs, errs = cv2.solvePnPGeneric(obj, img, K, dist, flags=cv2.SOLVEPNP_IPPE)
+        if not n:
+            return None
+        rvec, tvec = rvecs[0], tvecs[0]
+        errs = np.asarray(errs).ravel()
+        ambiguous = n > 1 and errs[1] < 1.5 * errs[0] and len(ids) == 1
     rvec, tvec = cv2.solvePnPRefineLM(obj, img, K, dist, rvec, tvec)
     R, _ = cv2.Rodrigues(rvec)
     proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
     err = float(np.sqrt(np.mean(np.sum((proj.reshape(-1, 2) - img) ** 2, axis=1))))
     pos = (-R.T @ tvec).ravel()
     fwd = R.T @ np.array([0.0, 0.0, 1.0])  # camera optical axis in world
-    return {"R": R, "t": tvec.ravel(), "rvec": rvec, "tvec": tvec, "err": err, "ids": ids, "pos": pos,
-            "yaw": math.degrees(math.atan2(fwd[1], fwd[0])),
-            "tilt": math.degrees(math.asin(max(-1.0, min(1.0, -fwd[2])))), "ambiguous": ambiguous}
+    sol = {"R": R, "t": tvec.ravel(), "rvec": rvec, "tvec": tvec, "err": err, "ids": ids, "pos": pos,
+           "yaw": math.degrees(math.atan2(fwd[1], fwd[0])), "mode": mode,
+           "tilt": math.degrees(math.asin(max(-1.0, min(1.0, -fwd[2])))), "ambiguous": ambiguous}
+    if mode == "centres" and pos[2] > 0:
+        sol["yaws"] = measure_yaws({i: seen[i] for i in ids}, sol, K, dist)
+    return sol
 
 
 def draw(view, sol, world, K, dist, seen):
@@ -91,16 +111,44 @@ def draw(view, sol, world, K, dist, seen):
 
 def summary(sol):
     x, y, z = sol["pos"]
-    s = (f"markers {sol['ids']}  reproj {sol['err']:.2f} px  camera at ({x:.2f}, {y:.2f}) m, "
+    s = (f"markers {sorted(sol['ids'])} ({sol['mode']})  reproj {sol['err']:.2f} px  camera at ({x:.2f}, {y:.2f}) m, "
          f"height {z:.2f} m, yaw {sol['yaw']:.0f}°, tilt down {sol['tilt']:.0f}°")
     warns = []
     if z <= 0:
-        warns.append("camera BELOW the floor: check marker yaw/positions in markers.json")
-    if sol["err"] > 3:
+        warns.append("camera BELOW the floor: marker positions in markers.json don't match the floor (IDs swapped?)")
+    if sol["err"] > 6:
         warns.append("reprojection error high: check marker positions / K")
     if sol["ambiguous"]:
         warns.append("single marker, pose ambiguous: add more markers in view")
     return s, warns
+
+
+def floor_point(px, sol, K, dist):
+    """Image pixel -> world floor point (z = 0) for a solved camera."""
+    ray = cv2.undistortPoints(np.array([[px]], np.float64), K, dist).reshape(2)
+    d = sol["R"].T @ np.array([ray[0], ray[1], 1.0])
+    c = sol["pos"]
+    return c + d * (-c[2] / d[2])
+
+
+def measure_yaws(seen, sol, K, dist):
+    """Each marker's actual rotation on the floor (deg), from its detected corners and a solved pose."""
+    yaws = {}
+    for i, c in seen.items():
+        tl, tr = floor_point(c[0], sol, K, dist), floor_point(c[1], sol, K, dist)
+        yaws[i] = round(math.degrees(math.atan2(tr[1] - tl[1], tr[0] - tl[0])), 1)
+    return yaws
+
+
+def save_yaws(yaws):
+    """Write measured sheet rotations into config/markers.json (only for known ids)."""
+    from calib.config_io import MARKERS, _dump
+    mcfg = load_markers()
+    for m in mcfg["markers"]:
+        if m["id"] in yaws:
+            m["yaw_deg"] = yaws[m["id"]]
+    MARKERS.write_text(_dump(mcfg))
+    print("measured marker rotations saved to config/markers.json:", yaws)
 
 
 def save(cam_id, sol):
@@ -109,6 +157,8 @@ def save(cam_id, sol):
                   extrinsics_rms_px=round(sol["err"], 2), extrinsics_markers=sol["ids"],
                   extrinsics_time=time.strftime("%Y-%m-%d %H:%M"))
     print(f"saved R/t for {cam_id} into config/cameras.json")
+    if sol["mode"] == "centres" and sol.get("yaws"):
+        save_yaws(sol["yaws"])
 
 
 def main():

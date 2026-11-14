@@ -59,7 +59,7 @@ Files: `printables/markers.pdf` (ArUco DICT_4X4_50, IDs 0-9, 180 mm; we use only
 - Print on A4 at **100% / "Actual size"**. Turn **off** "Fit to page" / "Shrink to fit".
 - Measure the **100 mm scale bar** on every page. If it's not 100 mm ± 1, reprint.
 - Mount on stiff card or foam board and keep the white margin. Matte paper reduces glare.
-- Corner markers 1, 3, 5, 7 lie flat on the floor at the corners of the space. ID 1 is the origin, 3 is along +x, 7 is along +y, 5 is the opposite corner. Lay them all the same way round, with the label towards the ID1–ID3 edge. Measure their centres into `config/markers.json`.
+- Corner markers 1, 3, 5, 7 lie flat on the floor at the corners of the space. The space is 1.5 m × 1.5 m. ID 1 is the origin, 7 is along +x, 5 is along +y and 3 is the opposite corner. Measure their centres into `config/markers.json`. `calib/extrinsics.py` measures how each sheet is rotated, so they don't need to be laid any particular way round.
 
 ## Layout
 ```

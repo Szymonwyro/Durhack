@@ -15,10 +15,10 @@ MARKER_MM = 180.0
 DICT_NAME = "DICT_4X4_50"
 # Only these IDs are used: corner markers flat on the floor (config/markers.json)
 CORNER_ROLES = {
-    1: "CORNER ID 1 = world origin. Flat on floor, label towards the ID1-ID3 edge",
-    3: "CORNER ID 3 = along +x from ID 1. Flat on floor, label towards the ID1-ID3 edge",
-    5: "CORNER ID 5 = opposite ID 1. Flat on floor, label towards the ID1-ID3 edge",
-    7: "CORNER ID 7 = along +y from ID 1. Flat on floor, label towards the ID1-ID3 edge",
+    1: "CORNER ID 1 = world origin (0, 0). Flat on floor",
+    3: "CORNER ID 3 = opposite ID 1 (1.5, 1.5). Flat on floor",
+    5: "CORNER ID 5 = along +y from ID 1 (0, 1.5). Flat on floor",
+    7: "CORNER ID 7 = along +x from ID 1 (1.5, 0). Flat on floor",
 }
 
 

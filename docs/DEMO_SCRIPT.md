@@ -42,7 +42,7 @@ Take the headset back, then point at the command map: "Here's the same picture f
 ## If something goes wrong
 | Problem | Do this |
 |---|---|
-| Ghosts are offset from the walker | Handler presses "re-align" (ID 1, then ID 3) and carries on talking |
+| Ghosts are offset from the walker | Handler presses "re-align" (ID 1, then ID 7) and carries on talking |
 | Quest went to sleep or left AR | Handler re-enters AR; it uses the saved alignment |
 | Tracks frozen | Operator checks Mac-1 server / network (`tools/net_check.py`) |
 | Quest unusable | Hand over the iPhone running web/viewer/ (2D overlay), or play the backup video |

@@ -1,11 +1,31 @@
 {
-  "_comment": "Corner markers of the demo space, flat on the floor, world metres. ONLY IDs 1, 3, 5, 7 are used. ID 1 = origin corner; ID 3 = along +x; ID 5 = opposite corner; ID 7 = along +y (1->3->5->7 anticlockwise seen from above). x/y are marker CENTRES: measure them with a tape and edit (currently 1.5 m x 1.5 m, diagonal 2.12 m). Check squareness: diagonal 1->5 = sqrt(W^2 + D^2). Lay all four the same way round, printed ID label towards the ID1-ID3 edge (yaw_deg 0 = top of the print points along +y).",
+  "_comment": "Corner markers of the 1.5 m x 1.5 m demo space, flat on the floor, world metres, as ACTUALLY laid out. ONLY IDs 1, 3, 5, 7 are used. ID 1 = origin; ID 7 = along +x; ID 5 = along +y; ID 3 = opposite corner (diagonal 1-3 = 2.12 m). x/y are marker CENTRES (measure). yaw_deg = sheet rotation, measured automatically by calib/extrinsics.py when a camera sees all 4; it's only used by cameras that see 1-3 markers.",
   "dictionary": "DICT_4X4_50",
   "size_m": 0.18,
   "markers": [
-    {"id": 1, "x": 0.0, "y": 0.0, "yaw_deg": 0},
-    {"id": 3, "x": 1.5, "y": 0.0, "yaw_deg": 0},
-    {"id": 5, "x": 1.5, "y": 1.5, "yaw_deg": 0},
-    {"id": 7, "x": 0.0, "y": 1.5, "yaw_deg": 0}
+    {
+      "id": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "yaw_deg": 85.5
+    },
+    {
+      "id": 7,
+      "x": 1.5,
+      "y": 0.0,
+      "yaw_deg": 90.7
+    },
+    {
+      "id": 3,
+      "x": 1.5,
+      "y": 1.5,
+      "yaw_deg": 85.3
+    },
+    {
+      "id": 5,
+      "x": 0.0,
+      "y": 1.5,
+      "yaw_deg": 83.7
+    }
   ]
 }

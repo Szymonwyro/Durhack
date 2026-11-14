@@ -81,9 +81,9 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 | iPhones | Personal Hotspot, fallback 2D AR viewer (web/viewer/), casting display |
 
 ## World frame (fixed — do not change without telling the team)
-Corner markers ArUco 1, 3, 5, 7 flat on the floor (config/markers.json): ID 1 = origin, ID 3 along +x,
-ID 7 along +y, ID 5 opposite corner; all laid the same way round (label towards the ID1-ID3 edge).
-Metres. x,y on the floor, z up. Person height 1.75 m. Only IDs 1, 3, 5, 7 are used.
+Corner markers ArUco 1, 3, 5, 7 flat on the floor of the 1.5 m x 1.5 m space (config/markers.json):
+ID 1 = origin (0,0), ID 7 along +x (1.5,0), ID 5 along +y (0,1.5), ID 3 opposite corner (1.5,1.5).
+Sheet rotations are measured automatically by calib/extrinsics.py. Metres. x,y on the floor, z up. Person height 1.75 m. Only IDs 1, 3, 5, 7 are used.
 Calibration: calib/intrinsics.py (chessboard) then calib/extrinsics.py (corner markers) -> config/cameras.json.
 
 ## Message contracts (see docs/CONTRACTS.md; additions here)
