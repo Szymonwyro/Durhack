@@ -1,0 +1,11 @@
+{
+  "_comment": "Floor ArUco markers in world metres. ID 0 = origin. MEASURE positions with a tape and edit. yaw_deg = rotation of the print about z (0 = print's top points along world +y). Lay ID 0 with its ID label nearest you: world +x = right, +y = away from you (towards the top of the print).",
+  "dictionary": "DICT_4X4_50",
+  "size_m": 0.18,
+  "markers": [
+    {"id": 0, "x": 0.0, "y": 0.0, "yaw_deg": 0},
+    {"id": 1, "x": 2.0, "y": 0.0, "yaw_deg": 0},
+    {"id": 2, "x": 0.0, "y": 2.0, "yaw_deg": 0},
+    {"id": 3, "x": 2.0, "y": 2.0, "yaw_deg": 0}
+  ]
+}

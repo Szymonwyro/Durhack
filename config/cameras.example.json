@@ -1,8 +1,8 @@
 {
-  "_comment": "Copy to cameras.json. K/dist from calib/intrinsics.py, R/t (world->camera) from calib/extrinsics.py. Units: metres.",
+  "_comment": "Reference only: config/cameras.json is written by calib/intrinsics.py and calib/extrinsics.py (committed, shared). K/dist from calib/intrinsics.py, R/t (world->camera) from calib/extrinsics.py. Units: metres.",
   "cameras": [
     {
-      "id": "cam1",
+      "id": "camA",
       "source": 0,
       "width": 1280,
       "height": 720,
@@ -12,7 +12,7 @@
       "t": [0, 0, 0]
     },
     {
-      "id": "cam2",
+      "id": "camB",
       "source": "http://PHONE_IP:8080/video",
       "width": 1280,
       "height": 720,
