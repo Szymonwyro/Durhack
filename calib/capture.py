@@ -26,6 +26,22 @@ from calib.config_io import ROOT, get_camera, parse_source
 RECORDINGS = ROOT / "recordings"
 
 
+def open_capture(source, width=None, height=None):
+    """cv2.VideoCapture for an index or URL, at the requested size if given.
+    Windows: DirectShow for camera indices (the default MSMF backend often ignores the size or fails on USB
+    cameras), plus MJPG so USB cameras can do 1280x720 at full frame rate."""
+    source = parse_source(source)
+    if isinstance(source, int) and sys.platform == "win32":
+        cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    else:
+        cap = cv2.VideoCapture(source)
+    if width and height:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    return cap
+
+
 class Camera:
     def __init__(self, source, width=None, height=None, name="cam"):
         self.source, self.width, self.height, self.name = parse_source(source), width, height, name
@@ -36,10 +52,7 @@ class Camera:
     def open(self):
         if self.cap is not None:
             self.cap.release()
-        self.cap = cv2.VideoCapture(self.source)
-        if self.width and self.height:
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap = open_capture(self.source, self.width, self.height)
         ok, frame = self.cap.read() if self.cap.isOpened() else (False, None)
         if not ok:
             print(f"[{self.name}] could not open source {self.source!r}; will retry", file=sys.stderr)

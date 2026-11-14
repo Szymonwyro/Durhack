@@ -1,3 +1,5 @@
+> **OUTDATED:** the relay isn't used any more. Use [HANDOFF_LAPTOP2_SERVER_CAMB.md](HANDOFF_LAPTOP2_SERVER_CAMB.md).
+
 # Handoff: start the camB stream on the Windows laptop (for Worker 2 / their AI assistant)
 
 **Goal:** send the USB camera on this Windows laptop to Mac-1 (Szymon's Mac) as **camB**.

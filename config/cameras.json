@@ -28,7 +28,6 @@
     },
     {
       "id": "camB",
-      "source": "http://127.0.0.1:8095/camB/stream.mjpg",
       "width": 1280,
       "height": 720,
       "K": [

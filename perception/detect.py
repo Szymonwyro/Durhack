@@ -44,6 +44,8 @@ def detect_video(
     classes: Sequence[int] | None = None,
     device: str | None = None,
     on_frame: Callable[[np.ndarray, FrameDetections], bool] | None = None,
+    width: int | None = None,
+    height: int | None = None,
 ) -> Iterator[FrameDetections]:
     """Yield per-frame object detections; positions are pixels, not world coordinates.
 
@@ -56,7 +58,12 @@ def detect_video(
         raise ValueError("confidence must be between 0 and 1")
 
     source: str | int = str(video_source) if isinstance(video_source, Path) else video_source
-    capture = cv2.VideoCapture(source)
+    if width and height:  # request the calibrated size (cameras default to e.g. 640x480 on Windows)
+        from calib.capture import open_capture
+
+        capture = open_capture(source, width, height)
+    else:
+        capture = cv2.VideoCapture(source)
     if not capture.isOpened():
         capture.release()
         raise OSError(f"Could not open video source: {video_source}")

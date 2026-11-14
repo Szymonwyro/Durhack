@@ -100,6 +100,9 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
     import websockets
 
     calibration, _ = load_camera(camera_id, str(source))
+    config = get_camera(camera_id)
+    size = (config.get("width"), config.get("height"))
+    warned = []
     outbound: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
     stop = threading.Event()
     finished = threading.Event()
@@ -117,6 +120,14 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
             outbound.put_nowait(message)
 
     def on_frame(frame: np.ndarray, result: FrameDetections) -> bool:
+        if not warned and size[0] and (frame.shape[1], frame.shape[0]) != size:
+            warned.append(True)
+            print(f"[{camera_id}] WARNING: camera gives {frame.shape[1]}x{frame.shape[0]} but it was calibrated at "
+                  f"{size[0]}x{size[1]}: floor positions will be WRONG. Wrong --source index, or another camera.",
+                  flush=True)
+        elif not warned:
+            warned.append(True)
+            print(f"[{camera_id}] camera OK at {frame.shape[1]}x{frame.shape[0]}, sending detections", flush=True)
         loop.call_soon_threadsafe(put_latest, make_message(camera_id, calibration, frame, result))
         return not stop.is_set()
 
@@ -129,6 +140,8 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
                 classes=args.classes,
                 device=args.device,
                 on_frame=on_frame,
+                width=size[0],
+                height=size[1],
             ):
                 if stop.is_set():
                     break
