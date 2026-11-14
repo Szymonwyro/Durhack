@@ -286,6 +286,24 @@ def make_app(args):
                 print("[bridge] bad ingest message:", e, m.data[:200], flush=True)
         return ws
 
+    log_path = ROOT / "logs" / "quest.log"
+
+    async def post_log(request):
+        """Quest remote debug (?debug=1): append entries as JSON lines to logs/quest.log; echo errors here."""
+        try:
+            body = await request.json()
+            entries = body.get("entries", [])
+            assert isinstance(entries, list)
+        except (ValueError, AssertionError, AttributeError):
+            raise web.HTTPBadRequest(text="expected {client, entries:[...]}")
+        log_path.parent.mkdir(exist_ok=True)
+        with log_path.open("a") as f:
+            for e in entries[:500]:
+                f.write(json.dumps({"client": body.get("client", "?"), **e}) + "\n")
+                if isinstance(e, dict) and e.get("level") in ("error", "warn"):
+                    print(f"[quest {e['level']}] {str(e.get('msg'))[:200]}", flush=True)
+        return web.json_response({"ok": True, "n": len(entries)})
+
     async def static(request):
         rel = request.match_info["path"]
         path = (ROOT / rel).resolve()
@@ -327,6 +345,7 @@ def make_app(args):
     app.router.add_get("/world", get_world)
     app.router.add_get("/tracks", ws_tracks)
     app.router.add_get("/ingest", ws_ingest)
+    app.router.add_post("/log", post_log)
     app.router.add_get("/{path:.*}", static)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)

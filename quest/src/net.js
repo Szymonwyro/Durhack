@@ -97,13 +97,28 @@ export function createFeed(handlers) {
 }
 
 // ---------------------------------------------------------------- live connection
-// Over adb reverse the page is served by the server itself, so same origin is right; otherwise
-// config/server.json (or ?server= / ?mode=) picks the server, falling back to this page's origin.
-async function serverBase() {
-  const q = new URLSearchParams(location.search);
-  if (q.get('server') || q.get('mode')) return loadServerUrl();
-  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return location.origin;
-  try { return await loadServerUrl(); } catch { return location.origin; }
+// Every URL comes from /config/server_url.js (?server=, ?mode=, or config/server.json) if it yields one,
+// else this page's origin (adb reverse, or the cloudflared tunnel). An https page never switches to an
+// http server (the browser would block it as mixed content). ws:// or wss:// follows the base's scheme.
+let resolvedBase = null;
+export const getBase = () => resolvedBase;
+export const wsState = { value: 'idle' };
+
+export async function serverBase() {
+  if (resolvedBase) return resolvedBase;
+  let base = location.origin;
+  try {
+    const u = await loadServerUrl();
+    if (location.protocol === 'https:' && u.startsWith('http:')) {
+      console.warn('[net] ignoring configured', u, '- http server from an https page; using', location.origin);
+    } else {
+      base = u;
+    }
+  } catch (e) {
+    // no usable server.json entry: same origin
+  }
+  resolvedBase = base;
+  return base;
 }
 
 export function startNet(feed, onStatus) {
@@ -127,12 +142,13 @@ export function startNet(feed, onStatus) {
   };
 
   async function connect() {
-    try { base = base || await serverBase(); } catch (e) { base = location.origin; }
+    base = base || await serverBase();
     await fetchWorld();
     const ws = new WebSocket(wsUrl(base, '/tracks'));
-    ws.onopen = () => onStatus('connected ' + base);
+    wsState.value = 'connecting';
+    ws.onopen = () => { wsState.value = 'open'; onStatus('connected ' + base); };
     ws.onmessage = (ev) => feed.handleText(ev.data);
-    ws.onclose = () => { onStatus('reconnecting'); setTimeout(connect, RECONNECT_S * 1000); };
+    ws.onclose = () => { wsState.value = 'closed'; onStatus('reconnecting'); setTimeout(connect, RECONNECT_S * 1000); };
     ws.onerror = () => {}; // onclose follows
   }
   connect();

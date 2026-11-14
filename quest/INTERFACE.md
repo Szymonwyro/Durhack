@@ -52,12 +52,28 @@ The headset reaches Mac-1 only through `adb reverse tcp:8001 tcp:8001`, so every
 | `GET /world` | World JSON (section 2) | |
 | `WS /tracks` | Track stream (section 3) | Same port, same origin |
 | `WS /events` | NEW Ping stream (section 4) | Same port, same origin |
+| `POST /log` | NEW Quest remote debug log (section 1a) | Same port, same origin; must also work through the tunnel |
 
 Requirements:
 
 - `.js` files served as `text/javascript` (ES modules fail otherwise). FastAPI StaticFiles is fine.
 - `Cache-Control: no-store` on `/quest/*` so a headset refresh always gets new code.
 - No auth, no redirects, no CORS needed (same origin).
+
+### 1a. POST /log — NEW (Role 2, small; Role 1's bridge already has it)
+
+With `?debug=1` the Quest POSTs once a second (it is untethered over the tunnel, so there is no other console):
+
+```json
+{"client":"quest", "entries":[
+  {"t":1763130000.1, "level":"error",  "msg":"..."},
+  {"t":1763130000.2, "level":"warn",   "msg":"..."},
+  {"t":1763130001.0, "level":"status", "msg":"fps 72 | ws open | align aligned | tracks 1 | age 0.05s | xr true"}]}
+```
+
+Server: append each entry as one JSON line (add `"client"`) to `logs/quest.log` (create `logs/`; add it to
+.gitignore), reply `200 {"ok":true}`. No auth. Read it with `tail -f logs/quest.log`. If /log is missing the
+Quest just shows its last 5 errors on its own debug panel, so this is nice-to-have.
 
 ## 2. GET /world (Role 3 owns the data, Role 2 serves it)
 

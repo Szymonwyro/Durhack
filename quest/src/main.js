@@ -7,9 +7,10 @@ import { buildWorld, buildCorners, setLayers, getWorld } from './world.js';
 import { buildZones, updateZones } from './zones.js';
 import { tracksGroup, onTracksMsg, updateTracks, trackCount, trackDots } from './tracks.js';
 import { attachMinimap, updateMinimap, toggleMinimap } from './minimap.js';
-import { attachHud, updateHud } from './hud.js';
+import { attachHud, updateHud, getFps } from './hud.js';
+import { initDebugLog, recentErrors, logEndpoint } from './debuglog.js';
 import { initAlign, setWorld as alignSetWorld, getPoints, getState, getFit, updateAlign, setMinimapToggle } from './align.js';
-import { createFeed, startNet, invalidCounts } from './net.js';
+import { createFeed, startNet, invalidCounts, wsState } from './net.js';
 import { startMock } from './mock.js';
 
 const enterBtn = document.getElementById('enter');
@@ -58,6 +59,11 @@ const feed = createFeed({
   },
   onTracks: (m) => { onTracksMsg(m); pirZones = m.zones; },
 });
+initDebugLog(() => {
+  const age = feed.dataAge();
+  return `fps ${getFps().toFixed(0)} | ws ${MOCK ? 'mock' : wsState.value} | align ${getState()} | tracks ${trackCount()}`
+    + ` | age ${Number.isFinite(age) ? age.toFixed(2) + 's' : '-'} | xr ${renderer.xr.isPresenting}`;
+});
 if (MOCK) startMock(feed);
 else startNet(feed, (s) => { if (s !== netStatus) console.log('[net]', s); netStatus = s; }); // log changes only
 
@@ -66,7 +72,7 @@ const sessionInit = { requiredFeatures: ['local-floor'], optionalFeatures: ['han
 let session = null;
 
 async function checkSupport() {
-  if (!window.isSecureContext) return 'Not a secure context. Open via http://localhost:8001 (adb reverse) or https.';
+  if (!window.isSecureContext) return 'Not a secure context. Open it over https (tunnel) or via adb reverse on this device.';
   if (!navigator.xr) return 'WebXR is not available in this browser (use the Quest browser).';
   try {
     if (!(await navigator.xr.isSessionSupported('immersive-ar'))) return 'immersive-ar (passthrough AR) is not supported here.';
@@ -143,8 +149,8 @@ renderer.setAnimationLoop(() => {
       `${MOCK ? 'mock' : 'live'} · ${netStatus}`.slice(0, 34),
       `align ${st}${fit ? ' ' + Math.round(fit.rms * 100) + 'cm' : ''} · wv ${feed.worldVersion() ?? '-'}`,
       `age ${Number.isFinite(age) ? age.toFixed(2) : '-'}s · tracks ${trackCount()}`,
-      `clock ${feed.clockOffset().toFixed(2)}s · bad ${nBad}`,
-    ]);
+      `clock ${feed.clockOffset().toFixed(2)}s · bad ${nBad} · log ${logEndpoint}`,
+    ], [...recentErrors()].reverse());
   }
   renderer.render(scene, camera);
 });
