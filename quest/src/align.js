@@ -168,8 +168,26 @@ function onTrigger() {
   else if (state === 'redo') { if (record(redoIdx)) review(); }
 }
 
-function onReset() {
-  console.warn('[align] reference space reset (recenter)');
+// Recenter / tracking-origin reset. If the event carries the origin shift (XRReferenceSpaceEvent.transform =
+// new origin expressed in the old space), move the map by its inverse and keep the calibration; otherwise
+// the alignment is lost and the wearer recalibrates.
+export function handleReset(e) {
+  const T = e && e.transform;
+  if (T && fit && (state === 'aligned' || state === 'review')) {
+    const inv = new THREE.Matrix4().compose(
+      new THREE.Vector3(T.position.x, T.position.y, T.position.z),
+      new THREE.Quaternion(T.orientation.x, T.orientation.y, T.orientation.z, T.orientation.w),
+      new THREE.Vector3(1, 1, 1)).invert();
+    mapRoot.updateMatrix();
+    const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    inv.multiply(mapRoot.matrix).decompose(pos, q, sc);
+    fit = { ...fit, theta: new THREE.Euler().setFromQuaternion(q, 'YXZ').y, x: pos.x, z: pos.z };
+    applyFit(fit);
+    if (state === 'aligned') save();
+    console.warn('[align] recenter: alignment carried over using the reset transform');
+    return;
+  }
+  console.warn('[align] reference space reset (recenter)' + (T ? '' : ' - no transform given, recalibrate'));
   if (state !== 'start') { forget(); state = 'lost'; samples = []; fit = null; rebuildCrosses(); }
 }
 
@@ -185,7 +203,7 @@ export function initAlign(renderer, scene, camera) {
     ctrl.addEventListener('disconnected', () => { if (right && right.ctrl === ctrl) { ctrl.remove(tip); right = null; } });
   }
   renderer.xr.addEventListener('sessionstart', () => {
-    renderer.xr.getReferenceSpace().addEventListener('reset', onReset);
+    renderer.xr.getReferenceSpace().addEventListener('reset', handleReset);
   });
 }
 
