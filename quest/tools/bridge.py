@@ -34,6 +34,7 @@ PREDICT_AFTER_S = 0.5   # 'predicted' when unseen for > 0.5 s
 DROP_PREDICTED_S = 8.0  # INTERFACE.md: drop once predicted for > ~8 s ...
 DROP_2SIGMA_M = 3.0     # ... or its 2-sigma radius exceeds ~3 m
 WORLD_VERSION = 1
+MAX_SPEED = 3.0         # m/s, cap on estimated walking speed
 GATE_M = 1.0            # max distance from a seen track to accept a detection (+ 2 sigma while predicted)
 MEAS_SIGMA = 0.10       # m, detection noise
 GROWTH = 0.35           # m/s, sigma growth while predicted
@@ -122,7 +123,11 @@ class Track:
         r = [z[0] - self.x[0], z[1] - self.x[1]]
         self.x = [self.x[0] + alpha * r[0], self.x[1] + alpha * r[1]]
         if dt_meas < 1.0:
-            self.v = [self.v[0] + beta * r[0] / dt_meas, self.v[1] + beta * r[1] / dt_meas]
+            dtv = max(dt_meas, 0.05)  # two detections in the same frame must not explode vel
+            self.v = [self.v[0] + beta * r[0] / dtv, self.v[1] + beta * r[1] / dtv]
+            speed = math.hypot(*self.v)
+            if speed > MAX_SPEED:
+                self.v = [self.v[0] * MAX_SPEED / speed, self.v[1] * MAX_SPEED / speed]
         self.last_seen = t
         self.seen_by[cam] = t
 
