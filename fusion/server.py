@@ -202,6 +202,9 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
                 await websocket.send_json({"error": "preview must be a JPEG under 1.5 MB"})
                 continue
 
+            pose = message.get("pose")  # camera worker's auto-calibrated position (calib/auto_pose.py)
+            if isinstance(pose, dict) and all(k in pose for k in ("R", "t", "pos", "yaw")):
+                camera_config[camera_id].update({k: pose[k] for k in ("R", "t", "pos", "yaw")})
             async with state_lock:
                 camera_state[camera_id] = {
                     "received_at": time.monotonic(),

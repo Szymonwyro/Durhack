@@ -44,6 +44,11 @@ If it stops with "camera gives 640x480 but K is for 1280x720", see Troubleshooti
 .venv\Scripts\python -m tools.camera_worker camB --source N --server ws://127.0.0.1:8000/ingest/camB --classes 0
 ```
 **Success:** the worker prints `connected to fusion server` and then **`camera OK at 1280x720, sending detections`**.
+**Auto-position (on by default):** the worker solves camB's position from the corner markers at startup and every 60 s
+(`auto-pose: calibrated from markers [1, 3, 5, 7] ...`) and sends it to the server, so the map shows the live position.
+Only a view of **all 4** markers updates it. Partial views only warn if the camera seems to have moved. Until the first
+4-marker view it uses the saved position. `--pose-interval 0` turns it off. Step 3 is still worth doing once
+(it saves a good starting position to git).
 Check: `http://127.0.0.1:8000/health` shows `"camB":{"online":true}`, and camB's feed appears on the map page.
 (Add `--device 0` on an NVIDIA GPU, `--device mps` on a Mac. CPU is the default and should still manage several fps.)
 

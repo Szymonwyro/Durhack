@@ -10,11 +10,13 @@ import json
 from pathlib import Path
 import queue
 import threading
+import time
 from typing import Any
 
 import cv2
 import numpy as np
 
+from calib.auto_pose import AutoPose
 from calib.config_io import get_camera, parse_source
 from perception.detect import FrameDetections, detect_video
 from perception.floor_project import CameraCalibration, project_detection
@@ -28,7 +30,7 @@ def load_camera(camera_id: str, source_override: str | None) -> tuple[CameraCali
     config = get_camera(camera_id)
     if config is None:
         raise KeyError(f"Camera {camera_id!r} is not in config/cameras.json")
-    missing = [key for key in ("K", "dist", "R", "t") if key not in config]
+    missing = [key for key in ("K", "dist") if key not in config]  # R/t may come from auto-pose
     if missing:
         raise ValueError(f"Camera {camera_id!r} needs calibration fields: {', '.join(missing)}")
     source = source_override if source_override is not None else config.get("source")
@@ -38,8 +40,8 @@ def load_camera(camera_id: str, source_override: str | None) -> tuple[CameraCali
         "id": camera_id,
         "K": config["K"],
         "dist": config["dist"],
-        "R": config["R"],
-        "t": config["t"],
+        "R": config.get("R"),
+        "t": config.get("t"),
     }
     return calibration, parse_source(source)
 
@@ -49,6 +51,7 @@ def make_message(
     calibration: CameraCalibration,
     frame: np.ndarray,
     result: FrameDetections,
+    pose: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     annotated = frame.copy()
     world_detections = []
@@ -67,6 +70,8 @@ def make_message(
             color,
             2,
         )
+        if calibration.get("R") is None:  # no camera position yet (auto-pose still looking for markers)
+            continue
         try:
             world_detections.append(project_detection(detection, calibration))
         except ValueError as error:
@@ -87,13 +92,16 @@ def make_message(
     if not ok:
         raise RuntimeError(f"[{camera_id}] failed to JPEG-encode camera preview")
 
-    return {
+    message = {
         "cam": camera_id,
         "t": result["timestamp"],
         "frame": result["frame"],
         "detections": world_detections,
         "jpeg": base64.b64encode(encoded).decode("ascii"),
     }
+    if pose is not None:
+        message["pose"] = {k: pose[k] for k in ("R", "t", "pos", "yaw", "err", "ids")}
+    return message
 
 
 async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -> None:
@@ -103,6 +111,17 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
     config = get_camera(camera_id)
     size = (config.get("width"), config.get("height"))
     warned = []
+    auto = None
+    if args.pose_interval > 0:
+        saved = ({"R": calibration["R"], "t": calibration["t"], "pos": config.get("pos")}
+                 if calibration["R"] is not None and config.get("pos") else None)
+        auto = AutoPose(camera_id, calibration["K"], calibration["dist"], interval_s=args.pose_interval,
+                        log=lambda text: print(text, flush=True), initial=saved)
+        print(f"[{camera_id}] auto-pose on: calibrating position from the corner markers now, then every "
+              f"{args.pose_interval:.0f} s" + (" (saved position used meanwhile)" if saved else
+                                                " (no detections sent until it has one)"), flush=True)
+    elif calibration["R"] is None:
+        raise ValueError(f"Camera {camera_id!r} has no saved position (R, t); run with --pose-interval > 0")
     outbound: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
     stop = threading.Event()
     finished = threading.Event()
@@ -128,7 +147,12 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace) -
         elif not warned:
             warned.append(True)
             print(f"[{camera_id}] camera OK at {frame.shape[1]}x{frame.shape[0]}, sending detections", flush=True)
-        loop.call_soon_threadsafe(put_latest, make_message(camera_id, calibration, frame, result))
+        if auto is not None:
+            update = auto.feed(frame)
+            if update:
+                calibration["R"], calibration["t"] = update["R"], update["t"]
+        pose = auto.pose if auto is not None else None
+        loop.call_soon_threadsafe(put_latest, make_message(camera_id, calibration, frame, result, pose))
         return not stop.is_set()
 
     def detect_camera() -> None:
@@ -208,6 +232,13 @@ def main() -> None:
     parser.add_argument("--confidence", type=float, default=0.25, help="Minimum confidence, 0 to 1")
     parser.add_argument("--classes", type=int, nargs="+", help="Optional YOLO class IDs, e.g. 0 for person")
     parser.add_argument("--device", help="Inference device, such as cpu, mps, or 0")
+    parser.add_argument(
+        "--pose-interval",
+        type=float,
+        default=60,
+        help="re-calibrate the camera position from the corner markers every N seconds (first at startup); "
+        "0 = use the saved position in config/cameras.json only",
+    )
     args = parser.parse_args()
     if not 0 <= args.confidence <= 1:
         parser.error("--confidence must be between 0 and 1")

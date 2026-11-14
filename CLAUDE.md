@@ -98,6 +98,8 @@ Sheet rotations are measured automatically by calib/extrinsics.py. Metres. x,y o
 Calibration, on the laptop the camera is plugged into: `python -m calib.intrinsics <cam> --source <N>` (chessboard, lens)
 then `python -m calib.position <cam>` (corner markers → camera position; picks the camera, offers commit+push).
 Neither changes `source` (per-laptop index) or markers.json yaws (use calib/extrinsics.py with all 4 markers for those).
+While running, tools/camera_worker.py re-solves its camera's position from the 4 corner markers at startup and every 60 s
+(calib/auto_pose.py, `--pose-interval`, 0 = off). The pose is kept in memory and sent to the server (not written to git).
 
 ## Message contracts (see docs/CONTRACTS.md; additions here)
 - detection (camera worker → server, WebSocket /ingest):
