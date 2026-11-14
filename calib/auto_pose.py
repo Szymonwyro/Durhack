@@ -21,6 +21,7 @@ from calib.extrinsics import detect, make_detector, marker_world_corners, solve
 
 MAX_ERR_PX = 4.0
 MOVE_M, MOVE_DEG = 0.05, 2.0
+JUMP_M, JUMP_DEG = 0.5, 20.0  # bigger moves need two matching 4-marker solves in a row (unplugged / swapped camera)
 
 
 def _big(moved):
@@ -36,6 +37,7 @@ class AutoPose:
         self.detector = make_detector(m.get("dictionary", "DICT_4X4_50"))
         self.pose = None  # current pose dict; `initial` = saved pose {"R", "t", "pos"} (not counted as 'ready')
         self.saved = initial
+        self.pending = None  # a big jump waiting for a second, matching solve
         self.next_solve = 0.0
         self.hist, self.frames = {}, 0
 
@@ -82,6 +84,18 @@ class AutoPose:
                          f"pose. If the camera moved, clear all 4 corner markers so it can re-solve.")
             self.next_solve = now + self._retry()
             return None
+        if moved is not None and (moved[0] > JUMP_M or moved[1] > JUMP_DEG):
+            prev = self.pending
+            self.pending = {"R": sol["R"], "pos": sol["pos"]}
+            same = prev is not None and _big((float(np.linalg.norm(np.asarray(sol["pos"]) - np.asarray(prev["pos"]))),
+                                              math.degrees(math.acos(max(-1.0, min(1.0, (np.trace(
+                                                  np.asarray(prev["R"]).T @ np.asarray(sol["R"])) - 1) / 2)))))) is False
+            if not same:
+                self.log(f"[{self.cam_id}] auto-pose: view jumped {moved[0] * 100:.0f} cm / {moved[1]:.0f} deg (camera "
+                         f"unplugged, swapped index, or moved?). Ignored unless the next check agrees.")
+                self.next_solve = now + min(self._retry(), 10.0)
+                return None
+        self.pending = None
         was_ready = self.ready
         self.pose = {"R": np.round(sol["R"], 6).tolist(), "t": np.round(sol["t"], 4).tolist(),
                      "pos": np.round(sol["pos"], 3).tolist(), "yaw": round(sol["yaw"], 1),
