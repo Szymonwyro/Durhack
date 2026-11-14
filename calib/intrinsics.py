@@ -60,8 +60,8 @@ def save(cam_id, K, dist, size, rms, source=None):
     fields = {"width": size[0], "height": size[1], "K": np.round(K, 3).tolist(),
               "dist": np.round(dist.ravel(), 6).tolist(), "intrinsics_rms_px": round(float(rms), 3),
               "fov": round(float(np.degrees(2 * np.arctan(size[0] / (2 * K[0, 0])))), 1)}
-    if source is not None:
-        fields["source"] = source
+    if source is not None and "source" not in (get_camera(cam_id) or {}):
+        fields["source"] = source  # only for a new camera: indices are per laptop, don't overwrite e.g. a relay URL
     update_camera(cam_id, **fields)
     print(f"saved K/dist for {cam_id} into config/cameras.json  (horizontal FOV {fields['fov']}°)")
 
