@@ -75,7 +75,9 @@
         bar.append(title, status);
         const image = document.createElement("img");
         image.alt = `Annotated live feed from ${camera.id}`;
-        image.src = `/camera/${encodeURIComponent(camera.id)}.mjpg`;
+        // unique URL per (re)connect: with the same URL browsers keep showing the cached last frame after a
+        // server restart (feed looks frozen while tracks still update)
+        image.src = `/camera/${encodeURIComponent(camera.id)}.mjpg?t=${Date.now()}`;
         image.onerror = () => { status.textContent = "No feed"; };
         image.onload = () => { status.textContent = "Live"; };
         card.append(bar, image);
