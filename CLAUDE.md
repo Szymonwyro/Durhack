@@ -73,6 +73,9 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 ## Handoffs
 - **Laptop 2 = fusion server + camB:** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md. Mac-1 runs the camA worker into it.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
+- **Live cameras → Quest (Role 1):** until fusion/server.py speaks quest/INTERFACE.md, run Role 1's bridge and feed it
+  the fusion server's fused positions: `python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py
+  ws://<laptop2-ip>:8000/tracks` (laptop 2's IP is in README.md). Bridge = stable ids, Kalman, world/align_points on :8001.
 - **Test data without cameras (Role 1/2):** samples/test_walk_camA.jsonl = 60 s of one person (Szymon) walking in
   and out of the 1.5 m square, seen by camA, as contract detection messages in world metres. Replay it into any
   server's WS /ingest at real pace, looping: `python3 tools/test_walk.py replay [--url ws://127.0.0.1:8001/ingest]`
