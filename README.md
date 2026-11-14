@@ -6,7 +6,13 @@
 
 Docs: [CONTRACTS](docs/CONTRACTS.md) · [PLAN](docs/PLAN.md) · [DEMO_SCRIPT](docs/DEMO_SCRIPT.md)
 
-IP : http://10.247.206.87:8000/
+## Live server (now)
+**The fusion server runs on Mac-1 (Szymon): `http://10.247.46.145:8010/`** (port 8010, not 8000; laptop 2 is down).
+- Map: `http://10.247.46.145:8010/`. Health: `http://10.247.46.145:8010/health`. Tracks: `ws://10.247.46.145:8010/tracks`.
+- **Jack / Quest:** `git pull`, then on the machine the Quest is plugged into:
+  `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks`
+  (bridge needs `pip install aiohttp websockets`). The Quest then uses `http://localhost:8001/quest/` as usual.
+- Camera workers send to `ws://10.247.46.145:8010/ingest/<camId>` (camA is already streaming from Mac-1).
 
 ## Setup
 ```bash
