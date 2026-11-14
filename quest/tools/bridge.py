@@ -13,13 +13,16 @@ Detections come from any of:
 
     python3 quest/tools/bridge.py --sim
     python3 quest/tools/bridge.py --camera camA
-    python3 quest/tools/bridge.py --host 0.0.0.0     # let workers on other machines reach /ingest
+    python3 quest/tools/bridge.py --tls-port 8443 --cert quest/.certs/cert.pem --key quest/.certs/key.pem
+                      # untethered: also HTTPS/WSS on 0.0.0.0:8443 for the Quest over Wi-Fi (same endpoints)
+Only quest/ and config/server_url.js|server.json are served as static files; /ingest accepts this machine only.
 """
 import argparse
 import asyncio
 import json
 import math
 import random
+import ssl
 import sys
 import threading
 import time
@@ -271,6 +274,8 @@ def make_app(args):
         return ws
 
     async def ws_ingest(request):
+        if request.remote not in ("127.0.0.1", "::1"):   # LAN-facing TLS port: no fake people from the venue Wi-Fi
+            raise web.HTTPForbidden(text="ingest is local only")
         ws = web.WebSocketResponse(heartbeat=10)
         await ws.prepare(request)
         async for m in ws:
@@ -299,7 +304,8 @@ def make_app(args):
         log_path.parent.mkdir(exist_ok=True)
         with log_path.open("a") as f:
             for e in entries[:500]:
-                f.write(json.dumps({"client": body.get("client", "?"), **e}) + "\n")
+                via = f"{request.scheme}://{request.host} from {request.remote}"  # which route the Quest is on
+                f.write(json.dumps({"client": body.get("client", "?"), "via": via, **e}) + "\n")
                 if isinstance(e, dict) and e.get("level") in ("error", "warn"):
                     print(f"[quest {e['level']}] {str(e.get('msg'))[:200]}", flush=True)
         return web.json_response({"ok": True, "n": len(entries)})
@@ -307,8 +313,10 @@ def make_app(args):
     async def static(request):
         rel = request.match_info["path"]
         path = (ROOT / rel).resolve()
-        if ROOT not in path.parents and path != ROOT:
-            raise web.HTTPForbidden()
+        allowed = (ROOT / "quest") in path.parents or path == ROOT / "quest" \
+            or path in (ROOT / "config" / "server_url.js", ROOT / "config" / "server.json")
+        if not allowed or ".certs" in path.parts:
+            raise web.HTTPNotFound()
         if path.is_dir():
             if not request.path.endswith("/"):
                 raise web.HTTPFound(request.path + "/" + (("?" + request.query_string) if request.query_string else ""))
@@ -359,6 +367,25 @@ if __name__ == "__main__":
     ap.add_argument("--sim", action="store_true", help="simulated camA person walking behind a wall")
     ap.add_argument("--camera", action="append", help="calibrated camera id from config/cameras.json (repeatable)")
     ap.add_argument("--model", default=str(ROOT / "yolo11n.pt"), help="YOLO weights")
+    ap.add_argument("--tls-port", type=int, default=0, help="also serve HTTPS/WSS on this port (e.g. 8443)")
+    ap.add_argument("--tls-host", default="0.0.0.0")
+    ap.add_argument("--cert", default=str(ROOT / "quest" / ".certs" / "cert.pem"))
+    ap.add_argument("--key", default=str(ROOT / "quest" / ".certs" / "key.pem"))
     args = ap.parse_args()
-    print(f"[bridge] http://{args.host}:{args.port}/quest/  sim={args.sim} cameras={args.camera or []}", flush=True)
-    web.run_app(make_app(args), host=args.host, port=args.port, print=None)
+
+    async def serve():
+        runner = web.AppRunner(make_app(args))
+        await runner.setup()
+        await web.TCPSite(runner, args.host, args.port).start()
+        print(f"[bridge] http://{args.host}:{args.port}/quest/  sim={args.sim} cameras={args.camera or []}", flush=True)
+        if args.tls_port:
+            ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ctx.load_cert_chain(args.cert, args.key)
+            await web.TCPSite(runner, args.tls_host, args.tls_port, ssl_context=ctx).start()
+            print(f"[bridge] https://{args.tls_host}:{args.tls_port}/quest/  (TLS)", flush=True)
+        await asyncio.Event().wait()
+
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass

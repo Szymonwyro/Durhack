@@ -7,7 +7,12 @@
 #   ./quest/dev.sh live [cam]   bridge [--camera cam] (real detections via /ingest or a local camera), open ?debug=1
 #   ./quest/dev.sh wireless     with the USB cable in: switch adb to Wi-Fi, connect, then unplug and keep going
 #                               (needs a network without client isolation, e.g. an iPhone hotspot)
-#   ./quest/dev.sh stop         kill server / replay / keeper, remove adb reverse/forward rules
+#   ./quest/dev.sh --untethered [fusion-ws-url]
+#                               Wi-Fi, no cable: bridge also on https://<mac-ip>:8443 (self-signed, quest/.certs/),
+#                               live feed from the fusion server (default: the "IP :" line in README.md) via
+#                               tools/fusion_to_quest.py, everything in restart loops. Route A = Quest -> Mac over
+#                               the venue Wi-Fi; falls back to Route B = cloudflared quick tunnel. Prints URL + QR.
+#   ./quest/dev.sh stop         kill server / replay / feed / tunnel / keeper, remove adb reverse/forward rules
 # A background keeper re-applies `adb reverse tcp:8001` whenever the headset reconnects (otherwise the page
 # shows "GET /world failed" after every cable drop or Wi-Fi blip).
 set -u
@@ -16,15 +21,20 @@ PORT=8001
 PIDFILE=/tmp/quest_http.pid
 KEEPER_PID=/tmp/quest_keeper.pid
 REPLAY_PID=/tmp/quest_replay.pid
+FUSION_PID=/tmp/quest_fusion.pid
+TUNNEL_PID=/tmp/quest_tunnel.pid
+TLS_PORT=8443
 
 if ! command -v adb >/dev/null; then
   echo "adb not found: brew install android-platform-tools"; exit 1
 fi
 
-kill_pidfile() { [ -f "$1" ] && kill "$(cat "$1")" 2>/dev/null && echo "$2 stopped"; rm -f "$1"; }
+kill_pidfile() { [ -f "$1" ] && { pkill -P "$(cat "$1")" 2>/dev/null; kill "$(cat "$1")" 2>/dev/null && echo "$2 stopped"; }; rm -f "$1"; }
 
 if [ "${1:-}" = "stop" ]; then
   kill_pidfile "$REPLAY_PID" "replay"
+  kill_pidfile "$FUSION_PID" "fusion feed"
+  kill_pidfile "$TUNNEL_PID" "tunnel"
   kill_pidfile "$KEEPER_PID" "keeper"
   kill_pidfile "$PIDFILE" "server"
   adb reverse --remove-all 2>/dev/null && echo "adb reverse removed"
@@ -50,6 +60,78 @@ if [ "${1:-}" = "wireless" ]; then
   fi
   adb connect "$IP:5555"
   echo "Wireless adb connected. You can unplug the cable; run ./quest/dev.sh [mode] as usual."
+  exit 0
+fi
+
+if [ "${1:-}" = "--untethered" ]; then
+  MAC=$(ipconfig getifaddr en0 || ipconfig getifaddr en1)
+  [ -z "$MAC" ] && { echo "This Mac has no Wi-Fi IPv4 address."; exit 1; }
+  FUSION="${2:-}"
+  if [ -z "$FUSION" ]; then
+    IPLINE=$(grep -m1 -E '^IP *: *http://' README.md | sed -E 's/^IP *: *http:\/\/([^/]+).*/\1/')
+    [ -n "$IPLINE" ] && FUSION="ws://$IPLINE/tracks"
+  fi
+  echo "Mac Wi-Fi: $MAC   fusion server: ${FUSION:-none (no live feed)}"
+  USB=$(usb_serial)
+  if [ -n "$USB" ]; then
+    Q=$(adb -s "$USB" shell ip -f inet addr show wlan0 | awk '/inet /{sub(/\/.*/,"",$2); print $2}')
+    echo "Quest Wi-Fi: ${Q:-NONE - join the Quest to the same Wi-Fi as this Mac}"
+  fi
+
+  # certificate for the current IP (regenerated when the network changes)
+  if [ "$(cat quest/.certs/ip 2>/dev/null)" != "$MAC" ]; then
+    mkdir -p quest/.certs
+    openssl req -x509 -newkey rsa:2048 -nodes -days 397 -keyout quest/.certs/key.pem -out quest/.certs/cert.pem \
+      -subj "/CN=quest-bridge" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:$MAC" \
+      -addext "extendedKeyUsage=serverAuth" -addext "basicConstraints=critical,CA:FALSE" 2>/dev/null \
+      && echo "$MAC" > quest/.certs/ip && echo "new self-signed cert for $MAC (accept it once in the Quest browser)"
+  fi
+
+  # bridge (HTTP 127.0.0.1:8001 for USB + HTTPS 0.0.0.0:8443 for Wi-Fi), restarted if it dies
+  if ! curl -sk -o /dev/null "https://127.0.0.1:$TLS_PORT/world"; then
+    kill_pidfile "$REPLAY_PID" "replay"; kill_pidfile "$PIDFILE" "old server"
+    P=$(lsof -t -iTCP:$PORT -sTCP:LISTEN | head -1); [ -n "$P" ] && kill "$P"
+    sleep 0.5
+    nohup bash -c "while true; do python3 -u quest/tools/bridge.py --tls-port $TLS_PORT; sleep 2; done" >/tmp/quest_http.log 2>&1 &
+    echo $! > "$PIDFILE"; sleep 2
+  fi
+  echo "bridge: http://127.0.0.1:$PORT (USB) + https://$MAC:$TLS_PORT (Wi-Fi)   log /tmp/quest_http.log"
+
+  # live feed: fusion server -> bridge
+  if [ -n "$FUSION" ] && ! { [ -f "$FUSION_PID" ] && kill -0 "$(cat "$FUSION_PID")" 2>/dev/null; }; then
+    nohup bash -c "while true; do python3 -u tools/fusion_to_quest.py $FUSION; sleep 2; done" >/tmp/quest_fusion.log 2>&1 &
+    echo $! > "$FUSION_PID"
+  fi
+  [ -n "$FUSION" ] && echo "live feed: $FUSION -> bridge   log /tmp/quest_fusion.log"
+
+  # Route A: can the Quest reach the Mac? (testable only while USB is attached; assumed otherwise)
+  ROUTE=A
+  if [ -n "$USB" ]; then
+    adb -s "$USB" shell "printf '' | toybox nc -w 5 $MAC $TLS_PORT" >/dev/null 2>&1 || ROUTE=B
+  fi
+  URL="https://$MAC:$TLS_PORT/quest/?debug=1"
+  if [ "$ROUTE" = B ]; then
+    echo "Route A blocked (Quest can't reach $MAC:$TLS_PORT) - trying Route B, cloudflared quick tunnel"
+    command -v cloudflared >/dev/null || { echo "cloudflared missing: brew install cloudflared"; exit 1; }
+    kill_pidfile "$TUNNEL_PID" "old tunnel"
+    nohup bash -c "while true; do cloudflared tunnel --no-autoupdate --protocol http2 --url http://localhost:$PORT; sleep 5; done" \
+      >/tmp/cloudflared.log 2>&1 &
+    echo $! > "$TUNNEL_PID"
+    T=""
+    for _ in $(seq 1 40); do
+      T=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | grep -v '//api\.' | head -1)
+      [ -n "$T" ] && break; sleep 1
+    done
+    [ -z "$T" ] && { echo "Route B failed too (this network blocks trycloudflare.com). Use an iPhone hotspot."; tail -2 /tmp/cloudflared.log; exit 1; }
+    URL="$T/quest/?debug=1"
+  fi
+  echo "ROUTE $ROUTE   URL $URL"
+  if [ -n "$USB" ]; then
+    adb -s "$USB" shell am start -a android.intent.action.VIEW -d "'$URL'" com.oculus.browser >/dev/null 2>&1 \
+      && echo "opened on the Quest$([ "$ROUTE" = A ] && echo ' - accept the certificate warning once (Advanced -> Proceed)')"
+  fi
+  if command -v qrencode >/dev/null; then qrencode -t ansiutf8 "$URL"; else echo "(brew install qrencode to get a QR code here)"; fi
+  echo "Headset status: tail -f logs/quest.log   (entries carry 'via' = route)"
   exit 0
 fi
 
