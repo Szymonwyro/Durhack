@@ -13,6 +13,10 @@ Docs: [CONTRACTS](docs/CONTRACTS.md) · [PLAN](docs/PLAN.md) · [DEMO_SCRIPT](do
   `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks`
   (bridge needs `pip install aiohttp websockets`). The Quest then uses `http://localhost:8001/quest/` as usual.
 - Camera workers send to `ws://10.247.46.145:8010/ingest/<camId>` (camA is already streaming from Mac-1).
+- Use `--margin 0.2` on fusion_to_quest so bystanders next to the square aren't shown; keep others out of the square.
+- **Quest alignment:** touch the 4 corner markers in the order the headset prompts: **1 → 7 → 3 → 5** (round the square). Wrong order = boxes move in the wrong direction.
+- The server now tracks people (fusion/tracker.py): stable ids, Kalman `vel`/`cov`, `visible`/`predicted`.
+  Skeletons (`--pose` on a worker) are built but not in use yet.
 
 ## Setup
 ```bash

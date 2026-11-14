@@ -1,5 +1,13 @@
 # Handoff: laptop 2 = fusion server + camB (for laptop 2's person / their AI)
 
+> **Update ~20:00:** laptop 2 died, so **the server now runs on Mac-1 (`ws://10.247.46.145:8010`)**. When laptop 2 is
+> back, run **only the camB worker** there, sending to Mac-1: `--server ws://10.247.46.145:8010/ingest/camB`
+> (skip the server step). Redo camB's position first (step 3): the saved one is still from 640x480.
+> **Server changes Caspar should know about (Role 3):** `fusion/tracker.py` is now implemented (stable ids, Kalman,
+> visible/predicted, optional skeletons) and `fusion/server.py` feeds every camera frame into it; `/tracks` people
+> come from the tracker, other classes are grouped as before (ids ≥ 100000). Workers also send their auto-calibrated
+> `pose`, which updates the map's camera positions. Tests: `python tests/test_tracker.py`.
+
 Setup now: **laptop 2** runs the fusion server (`fusion.server`, port 8000) and the camB worker.
 **Mac-1** (10.247.46.145) runs the camA worker and sends to laptop 2. The map is at `http://<laptop2-ip>:8000/`.
 The server works. These steps get **camB** running. (This replaces HANDOFF_CAMB_WINDOWS.md, because the relay isn't used any more.)

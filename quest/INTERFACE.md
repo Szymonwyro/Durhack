@@ -2,11 +2,13 @@
 
 Owner: Role 1 (Quest). Status: proposal. Items marked NEW are not yet in docs/CONTRACTS.md; Role 3 merges them there once the team agrees. Do not edit quest/ — this file only says what the Quest viewer needs from your parts.
 
-## Current status — what is still missing (checked 2026-11-14 against fusion/server.py at ec147e9)
+## Current status — what is still missing (checked 2026-11-14 ~20:00 against fusion/server.py at 7f0327e)
 
 The Quest viewer (quest/src/net.js) implements sections 1–3 exactly and **drops every message that doesn't match**,
-so today the real server shows nothing in the headset. Interim path that works now (Role 1's stand-in server,
-replaying Role 3's recording):
+so the real server still can't feed the headset directly. **Live path that works now:** the fusion server runs on
+Mac-1 (`ws://10.247.46.145:8010/tracks`, see README "Live server"); Role 1's bridge turns it into this spec:
+`python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks --margin 0.2`.
+Offline (Role 3's recording):
 
 ```bash
 python3 quest/tools/bridge.py                                         # :8001, /world + /tracks per this spec
@@ -21,17 +23,17 @@ python3 tools/test_walk.py replay --url ws://127.0.0.1:8001/ingest    # samples/
 | 3 | §2 GET /world | `/api/world`, no `v`, `world_version`, `align_points`, `objects`, `zones` | Add `GET /world` with all §2 fields (`bounds` may stay as an extra; keep `/api/world` for the map if you like). |
 | 4 | §3 first messages | none | On connect send `{"type":"world", ...}` then a tracks snapshot immediately. |
 | 5 | §3 envelope | `{"t", "tracks"}` | Every message: `"type":"tracks"`, `"v":1`, `"world_version"`, `"zones":[]`. ~15 Hz (today 10 Hz), also when empty. |
-| 6 | §3 `id` | `enumerate()` of this frame's matches — ids reshuffle every 100 ms | Stable per person for the whole run, never reused (needs the tracker). |
-| 7 | §3 `state`/Kalman | always `visible`; unseen people vanish | Constant-velocity Kalman: `predicted` when no camera sees them, cov growing; drop after ~8 s predicted or 2σ > 3 m. |
-| 8 | §3 track fields | `id,state,class_id,class_name,pos,seen_by,conf` | Required: `vel` [m/s], `cov` 2x2 [m²], `last_seen` (capture time). Extra fields are fine (ignored). |
-| 9 | people only | all YOLO classes | Send only `class_name == "person"` tracks, or the Quest draws boxes on chairs. |
+| 6 | §3 `id` | **done** (7f0327e, fusion/tracker.py): stable per person, never reused | — |
+| 7 | §3 `state`/Kalman | **done**: constant-velocity Kalman, `predicted` after 0.5 s unseen, sigma grows 0.35 m/s, dropped after 8 s or 2σ > 3 m (~4 s) | — |
+| 8 | §3 track fields | **done**: `vel`, `cov`, `last_seen` (server receive time) added; `class_id/class_name` kept for the map | — |
+| 9 | people only | people are tracker tracks; other classes still appear (ids ≥ 100000, `class_name` ≠ person, no vel/cov) | Drop non-person tracks for the Quest (`fusion_to_quest` already forwards people only), or run workers with `--classes 0`. |
 | 10 | §5 test input | `/ingest/{camera_id}` takes a new payload (detections list + JPEG) | Also accept contract `detection` messages on `/ingest` (what `tools/test_walk.py replay` and the PIR send), or agree a change with Role 3. |
 
 ### Role 3 (config/, calib/) — to do
 | # | Needed |
 |---|---|
 | 1 | `config/walls.json` with the real walls (does not exist yet → no walls in /world → "behind wall" can never trigger). ~5 cm accuracy. |
-| 2 | `align_points` = the 4 corner markers from config/markers.json **in touch order round the area, with their real printed IDs**: 1 (0,0) → 7 (1.5,0) → 3 (1.5,1.5) → 5 (0,1.5). The Quest shows the `marker` field, so use the printed IDs, not 0–3. |
+| 2 | **done**: markers.json lists 1, 7, 3, 5 in touch order (the bridge serves them as `align_points`). Wearers must touch the 4 corner markers in the order the headset prompts: **1 → 7 → 3 → 5** (round the square); touching in another order rotates everything. |
 | 3 | `objects` (exits/doors/hazards) and PIR `zones` polygons for /world; PIR state into /tracks `zones`. |
 | 4 | Merge the NEW items of this file into docs/CONTRACTS.md once Role 2 agrees. |
 

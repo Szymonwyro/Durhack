@@ -74,6 +74,9 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 - **Laptop 2 = fusion server + camB:** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md. Mac-1 runs the camA worker into it.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
 - **Current server: Mac-1, `http://10.247.46.145:8010/`** (port 8010; laptop 2 is down). camA streams into it.
+  The server tracks people (fusion/tracker.py: stable ids, Kalman, visible/predicted; tests in tests/).
+  Quest alignment: touch corners 1 → 7 → 3 → 5. Skeleton pipeline (`--pose`, `kp3d`, track `skeleton`) is built
+  through the server but not in use yet; fusion_to_quest/bridge pass-through not done.
   Quest: `python3 tools/fusion_to_quest.py ws://10.247.46.145:8010/tracks` next to the bridge (README "Live server").
 - **Live cameras → Quest (Role 1):** until fusion/server.py speaks quest/INTERFACE.md, run Role 1's bridge and feed it
   the fusion server's fused positions: `python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py

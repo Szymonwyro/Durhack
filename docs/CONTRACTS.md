@@ -49,7 +49,7 @@ The server uses an active zone as a loose position measurement: its centroid, wi
  "tracks": [{"id": 7, "state": "visible|predicted", "pos": [x, y], "vel": [vx, vy],
              "cov": [[a, b], [b, c]], "last_seen": 1731500000.1, "seen_by": ["camB"]}]}
 ```
-- `visible`: some camera saw the track recently. `predicted`: no camera has seen it for more than 0.5 s, so the position is a Kalman prediction. Tracks are dropped after 10 s unseen.
+- `visible`: some camera saw the track recently. `predicted`: no camera has seen it for more than 0.5 s, so the position is a Kalman prediction (sigma grows 0.35 m/s). Dropped after 8 s predicted or once 2σ > 3 m (~4 s). Implemented in fusion/tracker.py; `id` is stable per person. The server also sends `class_id`/`class_name` (map) and groups other classes per frame with ids ≥ 100000 (no vel/cov); viewers should use `class_name == "person"` only.
 - **The server does not send "hidden".** Each viewer decides hidden vs visible itself, by testing line of sight from its own position to the track against the walls.
 - Optional **`skeleton`** per track (omitted when the track has none):
   `{"kp": [[x, y, z, conf] | null, ... 17], "src": "camB", "age": 0.12, "frozen": false}`

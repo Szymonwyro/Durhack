@@ -18,9 +18,9 @@
    switch to immersive-vr with a room replica and tell the team.)
 3. Mock data: until Role 2's server is up, use a local JS mock (one person walking a loop).
    Then connect to wss://<server>/tracks and GET /world.
-4. Two-point alignment: trigger on corner marker ID 1 (origin), then on ID 7 (along +x, 1.5 m; see
-   config/markers.json). Compute the rotation and offset from Quest local space to world space. Save it
-   in localStorage (wrapped in try/catch) and add a "re-align" button.
+4. Alignment: touch the 4 corner markers in order 1 → 7 → 3 → 5 (round the square; config/markers.json order),
+   least-squares rotation + offset from Quest local space to world space. Saved in localStorage; re-align any
+   time (hold A+B 1 s). Touching in a different order rotates everything.
    Done when: a virtual marker drawn at world (0,0) sits on the real marker within ~10 cm.
 5. Rendering (world → Quest local space):
    - walls: faint outline boxes
