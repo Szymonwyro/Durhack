@@ -7,6 +7,9 @@
 Docs: [CONTRACTS](docs/CONTRACTS.md) · [PLAN](docs/PLAN.md) · [DEMO_SCRIPT](docs/DEMO_SCRIPT.md)
 
 ## Live server (now)
+
+terminal command to run a worker : python -m tools.camera_worker camB --source 1 --server ws://127.0.0.1:8010/ingest/camB --classes 0
+
 **The fusion server runs on this Windows PC: `http://10.247.206.87:8010/`** (port 8010).
 - Map: `http://10.247.206.87:8010/`. Health: `http://10.247.206.87:8010/health`. Tracks: `ws://10.247.206.87:8010/tracks`.
 - **Jack / Quest:** `git pull`, then on the machine the Quest is plugged into:
