@@ -319,6 +319,11 @@ async def world() -> JSONResponse:
         {
             "cameras": cameras_status(),  # id, pos, yaw, fov + state, weight, fps, lag_ms
             "walls": walls,
+            "markers": [
+                {"id": marker["id"], "x": float(marker["x"]), "y": float(marker["y"]),
+                 "size_m": float(marker.get("size_m", marker_data.get("size_m", 0.18)))}
+                for marker in markers
+            ],
             "bounds": [
                 min(xs) - padding,
                 max(xs) + padding,

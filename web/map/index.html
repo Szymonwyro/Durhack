@@ -37,8 +37,6 @@
 <body>
   <header>
     <h1>DurHack · shared live camera map</h1>
-    <label style="font-size:.9rem"><input type="checkbox" id="showSkeletons" checked> Skeletons</label>
-    <label style="font-size:.9rem" title="each camera's own skeleton (faint, camera colour) under the fused one (bold)"><input type="checkbox" id="showRaw"> per-camera (debug)</label>
     <span id="connection">Connecting to fusion server…</span>
   </header>
   <main>
@@ -66,26 +64,11 @@
     const calibrationLog = document.getElementById("calibration-log");
     const calibrationCountdown = document.getElementById("calibration-countdown");
     const recalibrateButton = document.getElementById("recalibrate");
-    let world = {bounds: [-0.5, 2, -0.5, 2], walls: [], cameras: []};
+    let world = {bounds: [-0.5, 2, -0.5, 2], walls: [], cameras: [], markers: []};
     let tracks = [];
     const seenRefreshes = new Map();
     let cameraStatuses = [];
-    // COCO-17 bones (docs/CONTRACTS.md)
     const STATE_COLOURS = {TRUSTED: "#3ccf5a", DEGRADED: "#f1bd3b", EXCLUDED: "#ff8a2a", OFFLINE: "#7d8486"};
-    const BONES = [[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16],[0,5],[0,6]];
-    const CAM_COLOURS = ["#ff6ad5", "#6aa8ff", "#ffd36a", "#9dff8a"];
-    const showRaw = document.getElementById("showRaw");
-    let rawSkeletons = {};   // track id -> {camId: [[x,y,z]|null x17]}  (GET /api/skeletons_raw, only while ticked)
-    setInterval(async () => {
-      if (!showRaw.checked) { rawSkeletons = {}; return; }
-      try { rawSkeletons = await (await fetch("/api/skeletons_raw")).json(); } catch (e) { rawSkeletons = {}; }
-    }, 120);
-    const showSkeletons = document.getElementById("showSkeletons");
-    try { showSkeletons.checked = localStorage.getItem("showSkeletons") !== "0"; } catch (e) {}
-    showSkeletons.addEventListener("change", () => {
-      try { localStorage.setItem("showSkeletons", showSkeletons.checked ? "1" : "0"); } catch (e) {}
-      draw();
-    });
 
     function addCalibrationLog(message) {
       const entry = document.createElement("div");
@@ -203,6 +186,15 @@
         const a = point(wall.a), b = point(wall.b);
         context.beginPath(); context.moveTo(...a); context.lineTo(...b); context.stroke();
       }
+      for (const marker of world.markers || []) {
+        const [mx, my] = point([marker.x, marker.y]);
+        const radius = Math.max(5, (marker.size_m || 0.18) * scale / 2);
+        context.beginPath(); context.arc(mx, my, radius, 0, Math.PI * 2);
+        context.fillStyle = "#f4c95d"; context.fill();
+        context.strokeStyle = "#fff4c2"; context.lineWidth = 2; context.stroke();
+        context.fillStyle = "#fff4c2"; context.font = "bold 12px system-ui";
+        context.fillText(`ID ${marker.id}`, mx + radius + 4, my - radius - 2);
+      }
       context.strokeStyle = "#718184";
       context.lineWidth = 1;
       context.strokeRect(left, bottom - mapHeight, mapWidth, mapHeight);
@@ -227,29 +219,6 @@
       }
 
       tracks.forEach((track, index) => {
-        if (showSkeletons.checked && showRaw.checked && rawSkeletons[track.id]) {  // each camera's own view, faint
-          const camIds = (world.cameras || []).map(c => c.id);
-          for (const [camId, joints] of Object.entries(rawSkeletons[track.id])) {
-            context.strokeStyle = CAM_COLOURS[Math.max(0, camIds.indexOf(camId)) % CAM_COLOURS.length];
-            context.globalAlpha = 0.45; context.lineWidth = 1;
-            for (const [a, b] of BONES) {
-              if (!joints[a] || !joints[b]) continue;
-              context.beginPath(); context.moveTo(...point(joints[a])); context.lineTo(...point(joints[b])); context.stroke();
-            }
-            context.globalAlpha = 1;
-          }
-        }
-        if (showSkeletons.checked && track.skeleton) {  // top-down: bones as thin lines (x, y only)
-          const kp = track.skeleton.kp;
-          context.strokeStyle = track.skeleton.frozen ? "rgba(255,170,60,0.55)" : "rgba(90,230,255,0.9)";
-          context.lineWidth = showRaw.checked ? 3 : 1.5;  // fused skeleton bold over the per-camera ones
-          context.setLineDash(track.skeleton.frozen ? [4, 3] : []);
-          for (const [a, b] of BONES) {
-            if (!kp[a] || !kp[b]) continue;
-            context.beginPath(); context.moveTo(...point(kp[a])); context.lineTo(...point(kp[b])); context.stroke();
-          }
-          context.setLineDash([]);
-        }
         const [x, y] = point(track.pos);
         const color = `hsl(${(track.class_id * 71 + 175) % 360} 90% 62%)`;
         context.beginPath(); context.arc(x, y, 8, 0, Math.PI * 2);
@@ -258,8 +227,7 @@
         const cameras = (track.seen_by || []).join(",");
         context.fillStyle = "#eef5f5";
         context.font = "13px system-ui";
-        const label = track.id < 100000 ? `#${track.id} ${track.state || ""}` +
-          (showSkeletons.checked && track.skeleton ? ` [${track.skeleton.src}]` : "") : track.class_name;
+        const label = track.id < 100000 ? `#${track.id} ${track.state || ""}` : track.class_name;
         context.fillText(`${label} ${track.pos[0].toFixed(2)}, ${track.pos[1].toFixed(2)}m · ${cameras}`, x + 12, y - 10);
       });
       tracksLabel.textContent = tracks.length
@@ -286,6 +254,7 @@
         if (wall.a) include(wall.a[0], wall.a[1]);
         if (wall.b) include(wall.b[0], wall.b[1]);
       }
+      for (const marker of world.markers || []) include(marker.x, marker.y, (marker.size_m || 0.18) / 2);
       return [xmin, xmax, ymin, ymax];
     }
 
