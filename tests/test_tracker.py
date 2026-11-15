@@ -47,6 +47,17 @@ def test_skeleton_lifecycle():
 
 
 def test_best_view_source():
+    """Legacy single-source mode (SKEL_FUSION=0). The fused mode is tested in tests/test_skeleton_fusion.py."""
+    import fusion.tracker as tracker_module
+
+    tracker_module.SKELETON_FUSION = False
+    try:
+        _best_view_source()
+    finally:
+        tracker_module.SKELETON_FUSION = True
+
+
+def _best_view_source():
     tr = Tracker()
     t = 2000.0
     tr.camera_frame("camA", [det(1.0, 1.0, kp(1.0, 1.0, conf=0.5))], t)

@@ -15,10 +15,13 @@ is predicted, the last skeleton is translated with the Kalman displacement since
 dropped after 3 s frozen.
 """
 import itertools
+import os
 import math
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+
+from fusion.skeleton import TrackSkeleton
 
 PREDICT_AFTER_S = 0.5
 DROP_PREDICTED_S = 8.0
@@ -46,6 +49,7 @@ SKEL_JOINT_HOLD_S = 0.5
 SKEL_FROZEN_DROP_S = 3.0
 
 _ids = itertools.count(1)
+SKELETON_FUSION = os.environ.get("SKEL_FUSION", "1") != "0"  # multi-camera skeleton (fusion/skeleton.py); 0 = best view
 
 
 def valid_kp3d(kp3d):
@@ -76,6 +80,7 @@ class Track:
         self.joint_t = [0.0] * 17   # last time each joint was updated
         self.skel_src = None
         self.skel_t = 0.0           # time the source camera last saw the joints
+        self.fused = TrackSkeleton() if SKELETON_FUSION else None
 
     # ---- Kalman
     def predict(self, t):
@@ -131,9 +136,11 @@ class Track:
         return pos, self.x[2:], cov
 
     # ---- skeleton
-    def add_skeleton(self, cam, kp3d, bbox, t):
+    def add_skeleton(self, cam, kp3d, bbox, t, foot=None):
         if not valid_kp3d(kp3d):
             return
+        if self.fused is not None and foot is not None:
+            return self.fused.add(cam, kp3d, foot, t, self.x[:2])
         confs = [j[3] for j in kp3d if j is not None]
         if not confs:
             return
@@ -157,6 +164,8 @@ class Track:
         self.skel_src, self.skel_t = src, st
 
     def skeleton_msg(self, now, predicted, pos_now):
+        if self.fused is not None:
+            return self.fused.msg(now, predicted, pos_now, self.last_seen)
         if self.skel is None:
             return None
         frozen = predicted
@@ -210,13 +219,13 @@ class Tracker:
         for r, c in matched:
             tr, d = self.tracks_[r], people[c]
             tr.update(d["position"], t, cam, recv=now)
-            tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now)
+            tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now, d.get("position"))
             used.add(c)
         for c, d in enumerate(people):
             if c not in used:
                 tr = Track(d["position"], t, cam)
                 tr.last_recv = now
-                tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now)
+                tr.add_skeleton(cam, d.get("kp3d"), d.get("bbox"), now, d.get("position"))
                 self.tracks_.append(tr)
 
     def drop_camera(self, cam, now):
@@ -227,6 +236,8 @@ class Tracker:
         for tr in self.tracks_:
             tr.seen.pop(cam, None)
             tr.skel_by_cam.pop(cam, None)
+            if tr.fused is not None:
+                tr.fused.drop_camera(cam)
             if tr.id is None and not tr.seen:
                 continue  # an unconfirmed blip from that camera only
             if not any(now - t <= PREDICT_AFTER_S for t in tr.seen.values()):

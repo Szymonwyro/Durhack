@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from calib.config_io import CAMERAS, MARKERS, ROOT
 from calib.refresh import load_thresholds
 from fusion.cameras import EXCLUDED, OFFLINE, CameraRegistry
+from fusion import skeleton as skeleton_fusion
 from fusion.tracker import Tracker
 from perception.floor_project import match_floor_detections
 
@@ -67,6 +68,7 @@ def process_message(camera_id: str, message: dict[str, Any], jpeg: bytes | None)
     """Call with state_lock held, after validation. Updates the registry and, if the camera is active, the
     tracker. Returns the state transitions."""
     changes = registry.on_message(camera_id, message, time.monotonic())
+    skeleton_fusion.set_camera(camera_id, camera_config.get(camera_id, {}).get("pos"), registry.weight(camera_id))
     apply_transitions(changes)
     if message.get("type") == "status":
         return changes
@@ -253,6 +255,15 @@ async def health() -> dict[str, Any]:
                 for camera_id in camera_config
             },
         }
+
+
+@app.get("/api/skeletons_raw")
+async def skeletons_raw() -> dict[str, Any]:
+    """Debug (map toggle): each camera's own root-aligned skeleton per track, before fusion."""
+    async with state_lock:
+        now = time.time()
+        return {str(tr.id): tr.fused.raw_msg(tr.state_at(now)[0]) for tr in tracker.tracks_
+                if tr.id is not None and tr.fused is not None and tr.fused.raw}
 
 
 @app.get("/cameras")
