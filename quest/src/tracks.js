@@ -24,6 +24,8 @@ const circleGeom = new THREE.BufferGeometry().setFromPoints(
     return new THREE.Vector3(Math.cos(a), 0.01, -Math.sin(a)); // unit circle on the floor, map-CCW
   }));
 let lineDistancesDone = false;
+// fused person box from the server (both cameras): 8 corners, bottom 0-3 then top 4-7 -> 12 edges
+const BOX_EDGES = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
@@ -44,7 +46,11 @@ class TrackView {
     this.text = text;
     this.label = sprite;
     this.label.position.y = PERSON.h + 0.18;
-    this.root.add(this.box, this.fill, this.path, this.label);
+    this.body = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',
+      new THREE.Float32BufferAttribute(new Float32Array(BOX_EDGES.length * 3), 3)), this.lineMat);
+    this.body.frustumCulled = false;
+    this.body.visible = false;
+    this.root.add(this.box, this.fill, this.path, this.label, this.body);
     this.ellipse = new THREE.LineLoop(circleGeom, new THREE.LineBasicMaterial({ color: COLORS.predicted, transparent: true }));
     tracksGroup.add(this.root, this.ellipse); // ellipse has its own scale/rotation in the map frame
 
@@ -90,6 +96,23 @@ class TrackView {
     this.fill.visible = hidden && !predicted;
     this.fill.material.opacity = 0.15 * alpha;
 
+    // live fused box: corners relative to the track's foot, map [dx, dy, z] -> three (dx, z, -dy)
+    const corners = !predicted && Array.isArray(m.box) && m.box.length === 8 ? m.box : null;
+    this.body.visible = !!corners;
+    this.box.visible = !corners;
+    if (corners) {
+      const pos = this.body.geometry.attributes.position;
+      BOX_EDGES.forEach((c, i) => pos.setXYZ(i, corners[c][0], corners[c][2], -corners[c][1]));
+      pos.needsUpdate = true;
+      this.body.geometry.computeBoundingSphere();
+      this.body.material = this.box.material;
+      this.body.renderOrder = this.box.renderOrder;
+      this.fill.visible = false;
+      this.label.position.y = Math.max(...corners.map((c) => c[2])) + 0.18;
+    } else {
+      this.label.position.y = PERSON.h + 0.18;
+    }
+
     const d = dist !== null ? ` · ${dist.toFixed(1)} m` : '';
     const label = predicted
       ? `#${m.id} · last seen ${Math.max(0, Math.round(serverNow - m.last_seen))} s ago`
@@ -125,7 +148,7 @@ class TrackView {
   dispose() {
     tracksGroup.remove(this.root, this.ellipse);
     this.lineMat.dispose(); this.dashMat.dispose(); this.fill.material.dispose();
-    this.path.geometry.dispose(); this.path.material.dispose(); this.ellipse.material.dispose();
+    this.path.geometry.dispose(); this.path.material.dispose(); this.body.geometry.dispose(); this.ellipse.material.dispose();
     this.label.material.dispose(); this.text.texture.dispose();
   }
 }

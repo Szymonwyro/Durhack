@@ -28,7 +28,7 @@ import threading
 import time
 from pathlib import Path
 
-from aiohttp import WSMsgType, web
+from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -102,6 +102,7 @@ class Track:
         self.t = t               # time of last predict/update
         self.last_seen = t
         self.seen_by = {cam: t}
+        self.box, self.box_t = None, 0.0  # fused person box: 8 corners relative to the foot [dx, dy, z]
 
     def predict(self, t):
         dt = t - self.t
@@ -150,6 +151,7 @@ class Track:
             "cov": [[round(s2, 4), 0.0], [0.0, round(s2, 4)]],
             "last_seen": round(self.last_seen, 3),
             "seen_by": sorted(c for c, ts in self.seen_by.items() if now - ts <= PREDICT_AFTER_S),
+            **({"box": self.box} if self.box and not predicted and now - self.box_t <= PREDICT_AFTER_S else {}),
         }
 
 
@@ -157,9 +159,10 @@ class Tracker:
     def __init__(self):
         self.tracks = []
         self.pir = {}  # sensor -> (active, t)
+        self.world_version = WORLD_VERSION  # bumped when /world changes (e.g. live camera poses)
         self.lock = threading.Lock()
 
-    def detection(self, cam, t, foot):
+    def detection(self, cam, t, foot, box=None):
         with self.lock:
             best, best_score = None, 1.0
             for tr in self.tracks:
@@ -171,7 +174,11 @@ class Tracker:
             if best:
                 best.update(foot, t, cam)
             else:
-                self.tracks.append(Track(foot, t, cam))
+                best = Track(foot, t, cam)
+                self.tracks.append(best)
+            if box and len(box) == 8:
+                best.box = [[round(v[0] - foot[0], 3), round(v[1] - foot[1], 3), round(v[2], 3)] for v in box]
+                best.box_t = t
 
     def zone(self, sensor, t, zone, active):
         """PIR state for the tracks message; an active zone pulls nearby predicted tracks to its centroid."""
@@ -192,7 +199,7 @@ class Tracker:
                            and 2 * math.sqrt(tr.sigma2(now)) <= DROP_2SIGMA_M]
             for tr in self.tracks:
                 tr.predict(now)
-            return {"type": "tracks", "v": 1, "t": round(now, 3), "world_version": WORLD_VERSION,
+            return {"type": "tracks", "v": 1, "t": round(now, 3), "world_version": self.world_version,
                     "tracks": [tr.msg(now) for tr in self.tracks],
                     "zones": [{"sensor": s, "active": a, "t": round(t, 3)} for s, (a, t) in self.pir.items()]}
 
@@ -284,7 +291,7 @@ def make_app(args):
             try:
                 d = json.loads(m.data)
                 if "foot" in d:
-                    tracker.detection(d["cam"], float(d.get("t", time.time())), d["foot"])
+                    tracker.detection(d["cam"], float(d.get("t", time.time())), d["foot"], d.get("box"))
                 elif "zone" in d:
                     tracker.zone(d.get("sensor", "pir"), float(d.get("t", time.time())), d["zone"], d.get("active", False))
             except (ValueError, KeyError, TypeError) as e:
@@ -325,6 +332,38 @@ def make_app(args):
             raise web.HTTPNotFound()
         return web.FileResponse(path)
 
+    async def sync_cameras(app):
+        """Live camera poses: workers auto-calibrate their position and send it to the fusion server, so
+        cameras.json can be stale. Poll the server's /api/world; on a change, bump world_version and push
+        the new world to connected Quests (they keep their alignment: align_points don't change)."""
+        url = args.fusion_http.rstrip("/") + "/api/world"
+        async with ClientSession(timeout=ClientTimeout(total=5)) as session:
+            while True:
+                try:
+                    async with session.get(url) as r:
+                        cams = [{"id": c["id"], "pos": [round(float(v), 3) for v in c["pos"]],
+                                 "yaw": round(float(c.get("yaw", 0)), 1), "fov": float(c.get("fov", 70))}
+                                for c in (await r.json()).get("cameras", []) if len(c.get("pos", [])) == 3]
+                    old = {c["id"]: c for c in world["cameras"]}
+                    moved = [c["id"] for c in cams if c["id"] not in old
+                             or math.dist(c["pos"], old[c["id"]]["pos"]) > 0.05
+                             or abs((c["yaw"] - old[c["id"]]["yaw"] + 180) % 360 - 180) > 2]
+                    if cams and (moved or len(cams) != len(old)):
+                        world["cameras"] = cams
+                        world["world_version"] += 1
+                        tracker.world_version = world["world_version"]
+                        print(f"[bridge] camera poses from {url}: {moved or 'list changed'} -> world_version "
+                              f"{world['world_version']}", flush=True)
+                        msg = json.dumps({"type": "world", **world})
+                        for ws in list(clients):
+                            try:
+                                await ws.send_str(msg)
+                            except ConnectionError:
+                                clients.discard(ws)
+                except Exception as e:  # server down / not reachable: keep the last poses
+                    print(f"[bridge] camera sync: {e!r}"[:160], flush=True)
+                await asyncio.sleep(10)
+
     async def broadcast(app):
         while True:
             msg = json.dumps(tracker.snapshot(time.time()))
@@ -339,6 +378,8 @@ def make_app(args):
 
     async def on_startup(app):
         app["tasks"] = [asyncio.create_task(broadcast(app))]
+        if args.fusion_http:
+            app["tasks"].append(asyncio.create_task(sync_cameras(app)))
         if args.sim:
             app["tasks"].append(asyncio.create_task(sim_camera(tracker)))
         for cam_id in args.camera or []:
@@ -368,6 +409,8 @@ if __name__ == "__main__":
     ap.add_argument("--camera", action="append", help="calibrated camera id from config/cameras.json (repeatable)")
     ap.add_argument("--model", default=str(ROOT / "yolo11n.pt"), help="YOLO weights")
     ap.add_argument("--tls-port", type=int, default=0, help="also serve HTTPS/WSS on this port (e.g. 8443)")
+    ap.add_argument("--fusion-http", default="", help="fusion server base URL (e.g. http://10.247.206.87:8010): "
+                    "take live camera poses from its /api/world every 10 s")
     ap.add_argument("--tls-host", default="0.0.0.0")
     ap.add_argument("--cert", default=str(ROOT / "quest" / ".certs" / "cert.pem"))
     ap.add_argument("--key", default=str(ROOT / "quest" / ".certs" / "key.pem"))

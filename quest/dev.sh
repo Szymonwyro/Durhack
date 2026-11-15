@@ -91,7 +91,8 @@ if [ "${1:-}" = "--untethered" ]; then
     kill_pidfile "$REPLAY_PID" "replay"; kill_pidfile "$PIDFILE" "old server"
     P=$(lsof -t -iTCP:$PORT -sTCP:LISTEN | head -1); [ -n "$P" ] && kill "$P"
     sleep 0.5
-    nohup bash -c "while true; do python3 -u quest/tools/bridge.py --tls-port $TLS_PORT; sleep 2; done" >/tmp/quest_http.log 2>&1 &
+    FHTTP=$(echo "$FUSION" | sed -E 's|^ws://|http://|; s|/tracks$||')
+    nohup bash -c "while true; do python3 -u quest/tools/bridge.py --tls-port $TLS_PORT${FHTTP:+ --fusion-http $FHTTP}; sleep 2; done" >/tmp/quest_http.log 2>&1 &
     echo $! > "$PIDFILE"; sleep 2
   fi
   echo "bridge: http://127.0.0.1:$PORT (USB) + https://$MAC:$TLS_PORT (Wi-Fi)   log /tmp/quest_http.log"
