@@ -113,7 +113,7 @@ def detect_video(
                     "foot": [center_x, y2] if class_name == "person" else None,
                 }
                 if keypoints is not None:
-                    from perception.skeleton import foot_from_ankles
+                    from perception.pose import foot_from_ankles
 
                     xy = keypoints.xy[index].tolist()
                     kc = keypoints.conf[index].tolist()

@@ -20,7 +20,7 @@ from calib.auto_pose import AutoPose
 from calib.refresh import DEFAULTS, load_thresholds
 from calib.config_io import get_camera, parse_source
 from perception.detect import FrameDetections, detect_video
-from perception.skeleton import BONES, JOINT_MIN_CONF, lift_keypoints
+from perception.pose import BONES, JOINT_MIN_CONF, lift_keypoints
 from perception.floor_project import CameraCalibration, project_detection
 
 ROOT = Path(__file__).resolve().parent.parent

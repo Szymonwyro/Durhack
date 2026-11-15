@@ -38,7 +38,7 @@ def make(a):
     from calib.config_io import get_camera
     from perception.detect import detect_video
     from perception.floor_project import project_detection
-    from perception.skeleton import lift_keypoints
+    from perception.pose import lift_keypoints
 
     video = Path(a.video)
     cam = get_camera(a.cam, a.cameras_json) if a.cameras_json else get_camera(a.cam)
