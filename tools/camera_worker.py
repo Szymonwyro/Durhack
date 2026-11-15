@@ -203,6 +203,7 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace, a
     loop = asyncio.get_running_loop()
     last_frame = [0.0]       # monotonic time of the latest camera frame
     last_heartbeat = [0.0]
+    refresh_requested = threading.Event()
 
     def put_latest(message: dict[str, Any]) -> None:
         try:
@@ -228,6 +229,9 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace, a
             warned.append(True)
             print(f"[{camera_id}] camera OK at {frame.shape[1]}x{frame.shape[0]}, sending detections", flush=True)
         if auto is not None:
+            if refresh_requested.is_set():
+                refresh_requested.clear()
+                auto.request_refresh()
             if auto.feed(frame):
                 calibration["R"], calibration["t"] = auto.pose["R"], auto.pose["t"]
             state, weight, reasons = auto.state, auto.weight, auto.reasons
@@ -243,6 +247,15 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace, a
         message = make_message(camera_id, calibration, frame, result, auto.pose if auto is not None else None,
                                banner=(state, weight))
         message.update(state=state, weight=round(weight, 3), reasons=list(reasons)[-2:])
+        if auto is not None:
+            message["refresh"] = {
+                "enabled": True,
+                "next_in_s": max(0.0, auto.next_check - time.time()) if auto.last_check_at is not None else None,
+                "last_check_at": auto.last_check_at,
+                "last_log": auto.last_log,
+            }
+        else:
+            message["refresh"] = {"enabled": False}
         if pose_stats is not None:
             pose_stats.add(message)
         loop.call_soon_threadsafe(put_latest, message)
@@ -303,6 +316,8 @@ async def publish(camera_id: str, source: str | int, args: argparse.Namespace, a
                     if response.get("ok") is not True:
                         raise RuntimeError(f"fusion server rejected frame {message.get('frame')}: "
                                            f"{response.get('error', 'unknown error')}")
+                    if response.get("recalibrate") is True:
+                        refresh_requested.set()
                 # hard disconnect: tell the server, then release the camera and close the socket
                 if auto is not None:
                     auto.set_offline(reason)

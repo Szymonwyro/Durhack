@@ -33,6 +33,7 @@ camera_timing: dict[str, Any] = {}  # camera -> CameraClock
 THRESHOLDS = load_thresholds()       # config/refresh.json (stale_timeout etc.)
 registry = CameraRegistry([], stale_timeout=THRESHOLDS["stale_timeout"])
 _offline_jpegs: dict[str, bytes] = {}
+pending_recalibrations: set[str] = set()
 
 
 def offline_jpeg(camera_id: str, state: str) -> bytes:
@@ -83,12 +84,23 @@ def process_message(camera_id: str, message: dict[str, Any], jpeg: bytes | None)
         tracker.camera_frame(camera_id, detections, arrival, t_capture=captured)
     else:
         detections = []  # EXCLUDED: preview only
+    refresh = message.get("refresh")
+    refresh_status = None
+    if isinstance(refresh, dict):
+        refresh_status = {
+            "enabled": refresh.get("enabled") is True,
+            "next_refresh_at": arrival + max(0.0, float(refresh["next_in_s"]))
+            if finite_number(refresh.get("next_in_s")) else None,
+            "last_check_at": refresh.get("last_check_at"),
+            "last_log": refresh.get("last_log") if isinstance(refresh.get("last_log"), str) else "",
+        }
     camera_state[camera_id] = {
         "received_at": time.monotonic(),
         "timestamp": float(message["t"]),
         "frame": message.get("frame", 0),
         "detections": detections,
         "jpeg": jpeg if jpeg is not None else offline_jpeg(camera_id, str(message.get("state"))),
+        "refresh": refresh_status,
     }
     return changes
 
@@ -100,8 +112,13 @@ def cameras_status() -> list[dict[str, Any]]:
     for camera_id, camera in camera_config.items():
         reg = snap.get(camera_id, {"state": OFFLINE, "weight": 0.0, "reasons": []})
         timing = camera_timing[camera_id].stats() if camera_id in camera_timing else {}
+        refresh = camera_state.get(camera_id, {}).get("refresh") or {}
         out.append({"id": camera_id, "pos": camera.get("pos", [0, 0, 0]), "yaw": camera.get("yaw", 0),
-                    "fov": camera.get("fov", 70), **reg, "fps": timing.get("fps"), "lag_ms": timing.get("lag_ms")})
+                    "fov": camera.get("fov", 70), **reg, "fps": timing.get("fps"), "lag_ms": timing.get("lag_ms"),
+                    "refresh_enabled": refresh.get("enabled", False),
+                    "next_refresh_at": refresh.get("next_refresh_at"),
+                    "last_refresh_at": refresh.get("last_check_at"),
+                    "last_refresh_log": refresh.get("last_log", "")})
     return out
 
 
@@ -272,6 +289,25 @@ async def cameras() -> dict[str, Any]:
         return {"t": time.time(), "cameras": cameras_status()}
 
 
+@app.post("/api/recalibrate")
+async def recalibrate() -> JSONResponse:
+    async with state_lock:
+        now = time.monotonic()
+        available = [
+            camera_id for camera_id, state in camera_state.items()
+            if now - state["received_at"] <= THRESHOLDS["stale_timeout"]
+            and registry.cams.get(camera_id, {}).get("state") != OFFLINE
+            and (state.get("refresh") or {}).get("enabled") is True
+        ]
+        if not available:
+            return JSONResponse(
+                {"detail": "No online cameras with automatic calibration are available."},
+                status_code=409,
+            )
+        pending_recalibrations.update(available)
+        return JSONResponse({"requested": sorted(available)})
+
+
 @app.get("/api/world")
 async def world() -> JSONResponse:
     _, walls, marker_data = load_world_config()
@@ -350,8 +386,11 @@ async def ingest(websocket: WebSocket, camera_id: str) -> None:
                 camera_config[camera_id].update({k: pose[k] for k in ("R", "t", "pos", "yaw")})
             async with state_lock:
                 process_message(camera_id, message, jpeg)
+                recalibrate = camera_id in pending_recalibrations
+                pending_recalibrations.discard(camera_id)
             # server_t lets the worker map its clock onto ours (NTP-style, from the round trip)
-            await websocket.send_json({"ok": True, "frame": frame_number, "server_t": time.time()})
+            await websocket.send_json({"ok": True, "frame": frame_number, "server_t": time.time(),
+                                       "recalibrate": recalibrate})
     except WebSocketDisconnect:
         return
     finally:  # socket closed (or handler crashed): this camera is OFFLINE now

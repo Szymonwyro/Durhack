@@ -42,10 +42,16 @@ class AutoPose:
         self.next_check = 0.0
         self.hist, self.frames = {}, 0
         self.last_decision = None
+        self.last_check_at = None
+        self.last_log = ""
 
     def reconnected(self):
         """Camera (re)opened: check on the next frames with the reconnect fast path."""
         self.context, self.next_check, self.hist, self.frames = "reconnect", 0.0, {}, 0
+
+    def request_refresh(self):
+        """Schedule a fresh marker check on the next frames."""
+        self.context, self.next_check, self.hist, self.frames = "routine", 0.0, {}, 0
 
     def set_offline(self, why):
         self.state, self.weight, self.reasons = OFFLINE, 0.0, [why]
@@ -87,7 +93,9 @@ class AutoPose:
         d = decide_refresh({i: np.asarray(c).tolist() for i, c in visible.items()},
                            None if expected is None else {i: np.asarray(c).tolist() for i, c in expected.items()},
                            self.displaced, solve_result, self.state, self.context, self.th)
-        self.log(format_log(self.cam_id, d, list(visible), solve_result))
+        self.last_check_at = now
+        self.last_log = format_log(self.cam_id, d, list(visible), solve_result)
+        self.log(self.last_log)
         changed = False
         if d.action == "replace_pose" and sol is not None:
             self.pose = {"R": np.round(sol["R"], 6).tolist(), "t": np.round(sol["t"], 4).tolist(),
