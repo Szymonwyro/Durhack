@@ -9,6 +9,7 @@ Run on the machine the Quest is plugged into, next to the bridge:
     ./quest/dev.sh live                                                    # or: Role 1's dev loop with the bridge
 Options: --bridge ws://127.0.0.1:8001/ingest (default), --margin 0.75 (m around the marker square), --print (show what would be sent, no bridge needed).
 
+Each track's optional `skeleton` (pose) is forwarded unchanged, also as a skeleton-only message when just the pose moved (> 2 cm).
 Only `person` tracks in state `visible` are forwarded (predicted ones would look like fresh sightings to the bridge), and each position only once (the fusion server repeats a camera's last frame
 for up to 1.5 s, and repeats would freeze the Kalman velocity). Timestamps are this machine's receive time,
 because laptop clocks differ. Needs only Python 3 + `pip install websockets` (the bridge itself needs `pip install aiohttp`).
@@ -22,6 +23,18 @@ from pathlib import Path
 MARKERS = Path(__file__).resolve().parent.parent / "config" / "markers.json"
 
 
+def skeleton_moved(skel, prev, eps=0.02):
+    """True if any joint moved more than eps (2 cm), appeared/disappeared, or frozen/src changed."""
+    if prev is None or skel.get("frozen") != prev.get("frozen") or skel.get("src") != prev.get("src"):
+        return True
+    for a, b in zip(skel.get("kp") or [], prev.get("kp") or []):
+        if (a is None) != (b is None):
+            return True
+        if a is not None and max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2])) > eps:
+            return True
+    return False
+
+
 async def run(a):
     import websockets
 
@@ -30,6 +43,13 @@ async def run(a):
     print(f"forwarding people within {a.margin} m of the marker area x {x0}..{x1}, y {y0}..{y1}", flush=True)
     bridge = None
     last = set()  # (cams, pos) in the previous fusion message
+    last_skel = {}  # track id -> last skeleton forwarded
+
+    async def send(message):
+        if a.print:
+            print(json.dumps(message), flush=True)
+        else:
+            await bridge.send(json.dumps(message))
     n_in = n_out = 0
     t_report = time.time()
     while True:
@@ -54,14 +74,19 @@ async def run(a):
                             continue  # someone outside the demo area (sofas, passers-by)
                         cams = "+".join(sorted(tr.get("seen_by") or ["fusion"]))
                         seen.add((cams, pos))
+                        skel = tr.get("skeleton")  # optional pose skeleton (--pose workers): forwarded unchanged
+                        skel_new = skel is not None and skeleton_moved(skel, last_skel.get(tr.get("id")))
+                        if skel_new:
+                            last_skel[tr.get("id")] = skel
                         if (cams, pos) in last:  # same camera frame repeated by the server
+                            if skel_new:  # the pose changed though: skeleton-only update (not a new sighting)
+                                await send({"cam": cams, "t": now, "pos": list(pos), "skeleton": skel})
                             continue
                         det = {"cam": cams, "t": now, "foot": list(pos)}
+                        if skel is not None:
+                            det["skeleton"] = skel
                         n_out += 1
-                        if a.print:
-                            print(json.dumps(det), flush=True)
-                        else:
-                            await bridge.send(json.dumps(det))
+                        await send(det)
                     last = seen
                     if now - t_report > 5:
                         print(f"{n_in} fusion messages in, {n_out} person positions forwarded (last 5 s)", flush=True)

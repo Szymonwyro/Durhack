@@ -103,6 +103,7 @@ class Track:
         self.last_seen = t
         self.seen_by = {cam: t}
         self.box, self.box_t = None, 0.0  # fused person box: 8 corners relative to the foot [dx, dy, z]
+        self.skel, self.skel_t, self.skel_x = None, 0.0, None  # pose skeleton (INTERFACE 3a), passed through as received
 
     def predict(self, t):
         dt = t - self.t
@@ -152,7 +153,19 @@ class Track:
             "last_seen": round(self.last_seen, 3),
             "seen_by": sorted(c for c, ts in self.seen_by.items() if now - ts <= PREDICT_AFTER_S),
             **({"box": self.box} if self.box and not predicted and now - self.box_t <= PREDICT_AFTER_S else {}),
+            **self.skel_msg(now, predicted),
         }
+
+    def skel_msg(self, now, predicted):
+        """INTERFACE 3a: live -> the skeleton exactly as the fusion server sent it. Track predicted -> the last
+        one moved with the track, frozen=true, for up to 3 s."""
+        if not self.skel or now - self.skel_t > (3.0 if predicted else 1.0):
+            return {}
+        if not predicted:
+            return {"skeleton": self.skel}
+        dx, dy = self.x[0] - self.skel_x[0], self.x[1] - self.skel_x[1]
+        kp = [None if j is None else [round(j[0] + dx, 3), round(j[1] + dy, 3), j[2], j[3]] for j in self.skel["kp"]]
+        return {"skeleton": {**self.skel, "kp": kp, "frozen": True, "age": round(now - self.skel_t, 2)}}
 
 
 class Tracker:
@@ -162,7 +175,14 @@ class Tracker:
         self.world_version = WORLD_VERSION  # bumped when /world changes (e.g. live camera poses)
         self.lock = threading.Lock()
 
-    def detection(self, cam, t, foot, box=None):
+    def skeleton(self, pos, skel, t):
+        """Skeleton-only update (pose changed, position didn't): attach to the nearest track, no position update."""
+        with self.lock:
+            near = min(self.tracks, key=lambda tr: math.dist(tr.x, pos), default=None)
+            if near is not None and math.dist(near.x, pos) <= GATE_M and isinstance(skel, dict) and skel.get("kp"):
+                near.skel, near.skel_t, near.skel_x = skel, t, list(near.x)
+
+    def detection(self, cam, t, foot, box=None, skel=None):
         with self.lock:
             best, best_score = None, 1.0
             for tr in self.tracks:
@@ -179,6 +199,8 @@ class Tracker:
             if box and len(box) == 8:
                 best.box = [[round(v[0] - foot[0], 3), round(v[1] - foot[1], 3), round(v[2], 3)] for v in box]
                 best.box_t = t
+            if isinstance(skel, dict) and skel.get("kp"):
+                best.skel, best.skel_t, best.skel_x = skel, t, list(best.x)
 
     def zone(self, sensor, t, zone, active):
         """PIR state for the tracks message; an active zone pulls nearby predicted tracks to its centroid."""
@@ -291,7 +313,9 @@ def make_app(args):
             try:
                 d = json.loads(m.data)
                 if "foot" in d:
-                    tracker.detection(d["cam"], float(d.get("t", time.time())), d["foot"], d.get("box"))
+                    tracker.detection(d["cam"], float(d.get("t", time.time())), d["foot"], d.get("box"), d.get("skeleton"))
+                elif "skeleton" in d and "pos" in d:
+                    tracker.skeleton(d["pos"], d["skeleton"], float(d.get("t", time.time())))
                 elif "zone" in d:
                     tracker.zone(d.get("sensor", "pir"), float(d.get("t", time.time())), d["zone"], d.get("active", False))
             except (ValueError, KeyError, TypeError) as e:
