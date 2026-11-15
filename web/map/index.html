@@ -44,7 +44,7 @@
       <h2>Floor positions · metres</h2>
       <canvas id="map" aria-label="Top-down live map"></canvas>
       <div id="map-actions">
-        <button id="recalibrate" type="button">Recalibrate cameras</button>
+        <button id="recalibrate" type="button" hidden>Recalibrate cameras</button>
         <span id="calibration-countdown">Waiting for camera status…</span>
       </div>
       <div id="calibration-log" role="log" aria-live="polite" aria-relevant="additions"></div>
@@ -263,6 +263,7 @@
         const response = await fetch("/api/world");
         if (!response.ok) throw new Error(`world config returned ${response.status}`);
         world = await response.json();
+        recalibrateButton.hidden = !world.can_recalibrate;
         setupFeeds(world.cameras);
         updateCameraStatuses(world.cameras);
         draw();

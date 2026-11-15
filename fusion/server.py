@@ -3,12 +3,13 @@
 import asyncio
 import base64
 import binascii
+import ipaddress
 import json
 import math
 import time
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from calib.config_io import CAMERAS, MARKERS, ROOT
@@ -192,6 +193,16 @@ def finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def is_server_host(request: Request) -> bool:
+    client = request.client
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        return False
+
+
 def validate_detection(detection: Any, camera_id: str) -> bool:
     if not isinstance(detection, dict):
         return False
@@ -290,7 +301,12 @@ async def cameras() -> dict[str, Any]:
 
 
 @app.post("/api/recalibrate")
-async def recalibrate() -> JSONResponse:
+async def recalibrate(request: Request) -> JSONResponse:
+    if not is_server_host(request):
+        return JSONResponse(
+            {"detail": "Recalibration is only available from the server host."},
+            status_code=403,
+        )
     async with state_lock:
         now = time.monotonic()
         available = [
@@ -309,7 +325,7 @@ async def recalibrate() -> JSONResponse:
 
 
 @app.get("/api/world")
-async def world() -> JSONResponse:
+async def world(request: Request) -> JSONResponse:
     _, walls, marker_data = load_world_config()
     markers = marker_data["markers"]
     xs = [float(marker["x"]) for marker in markers]
@@ -318,6 +334,7 @@ async def world() -> JSONResponse:
     return JSONResponse(
         {
             "cameras": cameras_status(),  # id, pos, yaw, fov + state, weight, fps, lag_ms
+            "can_recalibrate": is_server_host(request),
             "walls": walls,
             "markers": [
                 {"id": marker["id"], "x": float(marker["x"]), "y": float(marker["y"]),
