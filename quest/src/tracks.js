@@ -9,6 +9,7 @@ import { COLORS, PERSON, NEAR_SKIP_M, EXTRAP_CAP_S, SMOOTH_TAU_S, FADE_S, HEADIN
 import { mapRoot, mapToThree } from './frames.js';
 import { blockingWall } from './los.js';
 import { textSprite, css } from './label.js';
+import { SkeletonView } from './skeleton.js';
 
 export const tracksGroup = new THREE.Group();
 mapRoot.add(tracksGroup);
@@ -51,6 +52,8 @@ class TrackView {
     this.body.frustumCulled = false;
     this.body.visible = false;
     this.root.add(this.box, this.fill, this.path, this.label, this.body);
+    this.skel = new SkeletonView();   // pose skeleton (track.skeleton, INTERFACE 3a); hidden when absent
+    this.root.add(this.skel.object);
     this.ellipse = new THREE.LineLoop(circleGeom, new THREE.LineBasicMaterial({ color: COLORS.predicted, transparent: true }));
     tracksGroup.add(this.root, this.ellipse); // ellipse has its own scale/rotation in the map frame
 
@@ -113,6 +116,10 @@ class TrackView {
       this.label.position.y = PERSON.h + 0.18;
     }
 
+    if (this.skel.update(m, dt, alpha, color, hidden, head ? { x: head[0] - this.disp[0], z: -(head[1] - this.disp[1]) } : null)) {
+      this.label.position.y = Math.max(this.label.position.y, this.skel.top + 0.18);
+    }
+
     const d = dist !== null ? ` · ${dist.toFixed(1)} m` : '';
     const label = predicted
       ? `#${m.id} · last seen ${Math.max(0, Math.round(serverNow - m.last_seen))} s ago`
@@ -149,7 +156,7 @@ class TrackView {
     tracksGroup.remove(this.root, this.ellipse);
     this.lineMat.dispose(); this.dashMat.dispose(); this.fill.material.dispose();
     this.path.geometry.dispose(); this.path.material.dispose(); this.body.geometry.dispose(); this.ellipse.material.dispose();
-    this.label.material.dispose(); this.text.texture.dispose();
+    this.label.material.dispose(); this.text.texture.dispose(); this.skel.dispose();
   }
 }
 
