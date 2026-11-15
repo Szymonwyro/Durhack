@@ -74,17 +74,17 @@ awareness for firefighters and search & rescue. Never use "Lattice"/"Anduril" in
 - **camC on Jack's computer (worker 1):** docs/HANDOFF_CAMC_JACK.md (own camera: lens calibration, position, worker
   into Caspar's server; Caspar restarts his server after camC is pushed).
 - **Laptop 2 = camB worker only (Caspar):** docs/HANDOFF_LAPTOP2_SERVER_CAMB.md, sending to Mac-1's server
-  `ws://10.247.206.87:8010/ingest/camB`.
+  `ws://<server-ip>:8010/ingest/camB`.
   Camera indices are per laptop: always pass `--source N` (camB has no `source` in cameras.json on purpose).
-- **Current server: Caspar's Windows PC, `http://10.247.206.87:8010/`** (port 8010; server only). camA = Szymon's Mac,
+- **Current server: Caspar's Windows PC, `http://<server-ip>:8010/`** (port 8010; server only). camA = Szymon's Mac,
   camB = Jack's computer (docs/HANDOFF_CAMC_JACK.md).
   The server tracks people (fusion/tracker.py: stable ids, Kalman, visible/predicted; tests in tests/).
   Quest alignment: touch corners 1 → 7 → 3 → 5. Skeleton pipeline (`--pose`, `kp3d`, track `skeleton`) is built
   through the server but not in use yet; fusion_to_quest/bridge pass-through not done.
-  Quest: `python3 tools/fusion_to_quest.py ws://10.247.206.87:8010/tracks` next to the bridge (README "Live server").
+  Quest: `python3 tools/fusion_to_quest.py ws://<server-ip>:8010/tracks` next to the bridge (README "Live server").
 - **Live cameras → Quest (Role 1):** until fusion/server.py speaks quest/INTERFACE.md, run Role 1's bridge and feed it
   the fusion server's fused positions: `python3 quest/tools/bridge.py` + `python3 tools/fusion_to_quest.py
-  ws://10.247.206.87:8010/tracks` (the server on this Windows PC, see README "Live server"). Bridge = stable ids, Kalman, world/align_points on :8001.
+  ws://<server-ip>:8010/tracks` (the server on this Windows PC, see README "Live server"). Bridge = stable ids, Kalman, world/align_points on :8001.
 - **Test walk 2 (30 s, camA from its new spot, sees whole bodies):** samples/test_walk2_camA.jsonl (boxes) and
   samples/test_walk2_camA_pose.jsonl (+ kp3d skeletons, 820/826 detections); camA pose used: samples/test_walk2_camA_cameras.json.
   Replay like the first one, e.g. `python3 tools/test_walk.py replay samples/test_walk2_camA_pose.jsonl --fusion --url ws://<server>/ingest/camA`.

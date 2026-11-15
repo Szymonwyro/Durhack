@@ -1,11 +1,11 @@
 # Handoff: Jack's computer runs a camera worker (for Jack / his AI)
 
-> **Now: Jack's computer runs camB** (already calibrated and feeding Caspar's server at `10.247.206.87:8010`).
+> **Now: Jack's computer runs camB** (already calibrated and feeding Caspar's server at `<server-ip>:8010`).
 > Caspar's PC runs the server only. To add skeletons, go straight to **"Skeletons on this camera"** below with
-> `<camId>` = `camB` and `<server>` = `10.247.206.87`. The steps for a brand-new camera (camC) stay below for reference.
+> `<camId>` = `camB` and `<server>` = `<server-ip>`. The steps for a brand-new camera (camC) stay below for reference.
 
 **Goal:** a camera plugged into Jack's Mac becomes **camC** and sends detections to the fusion server on Caspar's laptop
-(`ws://10.247.206.87:8010`, see README "Live server"). camA (Szymon's Mac) and camB (Caspar) are already running.
+(`ws://<server-ip>:8010`, see README "Live server"). camA (Szymon's Mac) and camB (Caspar) are already running.
 This runs alongside Jack's Quest bridge, and doesn't change it.
 
 ## Rules for the AI
@@ -56,11 +56,11 @@ camA and camB reconnect by themselves.
 
 ## 5. Run the camC worker (leave it running)
 ```bash
-.venv/bin/python -m tools.camera_worker camC --source N --server ws://10.247.206.87:8010/ingest/camC --classes 0 --device mps
+.venv/bin/python -m tools.camera_worker camC --source N --server ws://<server-ip>:8010/ingest/camC --classes 0 --device mps
 ```
 (`--device mps` on Apple Silicon. Leave it out on Intel Macs.)
 **Success:** `connected to fusion server`, then `camera OK at 1280x720, sending detections`, then every 60 s an
-`auto-pose: ...` line. Check `http://10.247.206.87:8010/health`: `"camC": {"online": true, "fps": ..., "lag_ms": ...,
+`auto-pose: ...` line. Check `http://<server-ip>:8010/health`: `"camC": {"online": true, "fps": ..., "lag_ms": ...,
 "clock": "synced"}`.
 
 ## Skeletons on this camera (`--pose`)
@@ -87,7 +87,7 @@ The server needs no change (it must be on current `main`). Without `--pose` ever
 |---|---|
 | Worker closes with code 1008 / "Unknown camera 'camC'" | Caspar's server was started before camC was pushed: he needs `git pull` + restart. |
 | `WARNING: camera gives 1920x1080 / 640x480 but it was calibrated at 1280x720` | Wrong camera, or it can't do 720p. Redo step 3 at what it gives (`--width/--height`), then step 4. |
-| `server connection failed; retrying` | Not on the same Wi-Fi as Caspar (`10.247.x.x`), or wrong address/port (**8010**). Open `http://10.247.206.87:8010/health` in a browser. |
+| `server connection failed; retrying` | Not on the same Wi-Fi as Caspar (`10.247.x.x`), or wrong address/port (**8010**). Open `http://<server-ip>:8010/health` in a browser. |
 | `auto-pose: CAMERA MOVED` / view jumped | The camera got bumped. Re-mount it, then redo step 4. |
 | Continuity Camera freezes / disappears | The phone got unlocked, moved away or went to sleep. Lock it, keep it close and charging, then re-check N (step 2), because numbers shift. |
 | Very slow | Close other camera apps and previews. The Quest bridge is light; YOLO is the heavy part. |

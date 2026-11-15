@@ -13,18 +13,18 @@ https://claude.ai/artifact/A5HWpdMg3yfzdyX343ivJJ
 
 | Computer | Runs |
 |---|---|
-| Caspar's Windows PC (`10.247.206.87`) | fusion server only, port 8010 |
+| Caspar's Windows PC (`<server-ip>`) | fusion server only, port 8010 |
 | Szymon's Mac (Mac-1) | camA worker (with `--pose`) |
 | Jack's computer | camB worker (+ the Quest bridge) |
 
-**The fusion server runs on Caspar's Windows PC: `http://10.247.206.87:8010/`** (port 8010).
-- Map: `http://10.247.206.87:8010/`. Health: `/health`. Camera states: `/cameras`. Tracks: `ws://10.247.206.87:8010/tracks`.
+**The fusion server runs on Caspar's Windows PC: `http://<server-ip>:8010/`** (port 8010).
+- Map: `http://<server-ip>:8010/`. Health: `/health`. Camera states: `/cameras`. Tracks: `ws://<server-ip>:8010/tracks`.
 - **Caspar:** server only: `python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8010` on current `main`.
-- **Szymon / camA:** `python -m tools.camera_worker camA --source 1 --server ws://10.247.206.87:8010/ingest/camA --classes 0 --pose`
-- **Jack / camB:** `python -m tools.camera_worker camB --source N --server ws://10.247.206.87:8010/ingest/camB --classes 0 --pose`
+- **Szymon / camA:** `python -m tools.camera_worker camA --source 1 --server ws://<server-ip>:8010/ingest/camA --classes 0 --pose`
+- **Jack / camB:** `python -m tools.camera_worker camB --source N --server ws://<server-ip>:8010/ingest/camB --classes 0 --pose`
   (`--pose` = skeletons; see "Skeletons on this camera" in docs/HANDOFF_CAMC_JACK.md).
 - **Jack / Quest:** `git pull`, then on the machine the Quest is plugged into:
-  `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://10.247.206.87:8010/tracks --margin 0.2`
+  `python3 quest/tools/bridge.py` and `python3 tools/fusion_to_quest.py ws://<server-ip>:8010/tracks --margin 0.2`
   (bridge needs `pip install aiohttp websockets`). The Quest then opens `http://localhost:8001/quest/`.
   `--margin 0.2` hides bystanders next to the square; keep others out of the square.
 - **Quest alignment:** touch the 4 corner markers in the order the headset prompts: **1 → 7 → 3 → 5** (round the
@@ -175,7 +175,7 @@ One computer runs the fusion server; every computer has the same calibrated `con
 to each computer, so pass the local camera index with `--source`.
 ```powershell
 python -m uvicorn fusion.server:app --host 0.0.0.0 --port 8010                                     # server
-python -m tools.camera_worker camA --source 1 --server ws://10.247.206.87:8010/ingest/camA --classes 0 --pose  # each camera
+python -m tools.camera_worker camA --source 1 --server ws://<server-ip>:8010/ingest/camA --classes 0 --pose  # each camera
 ```
 Find the server's LAN IP with `python tools/lan_ip.py` and allow Python/Uvicorn through the firewall on the private
 network if prompted. Open `http://<server>:8010/` on any computer for the shared map and camera feeds. Keep cameras

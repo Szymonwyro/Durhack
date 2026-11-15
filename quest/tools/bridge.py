@@ -433,7 +433,7 @@ if __name__ == "__main__":
     ap.add_argument("--camera", action="append", help="calibrated camera id from config/cameras.json (repeatable)")
     ap.add_argument("--model", default=str(ROOT / "yolo11n.pt"), help="YOLO weights")
     ap.add_argument("--tls-port", type=int, default=0, help="also serve HTTPS/WSS on this port (e.g. 8443)")
-    ap.add_argument("--fusion-http", default="", help="fusion server base URL (e.g. http://10.247.206.87:8010): "
+    ap.add_argument("--fusion-http", default="", help="fusion server base URL (e.g. http://<server-ip>:8010): "
                     "take live camera poses from its /api/world every 10 s")
     ap.add_argument("--tls-host", default="0.0.0.0")
     ap.add_argument("--cert", default=str(ROOT / "quest" / ".certs" / "cert.pem"))

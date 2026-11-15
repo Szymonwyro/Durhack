@@ -5,7 +5,7 @@ into the exact quest/INTERFACE.md format (stable ids, Kalman vel/cov, visible/pr
 
 Run on the machine the Quest is plugged into, next to the bridge:
     python3 quest/tools/bridge.py                                           # terminal 1 (Role 1's stand-in server)
-    python3 tools/fusion_to_quest.py ws://10.247.206.87:8000/tracks        # terminal 2
+    python3 tools/fusion_to_quest.py ws://<server-ip>:8000/tracks        # terminal 2
     ./quest/dev.sh live                                                    # or: Role 1's dev loop with the bridge
 Options: --bridge ws://127.0.0.1:8001/ingest (default), --margin 0.75 (m around the marker square), --print (show what would be sent, no bridge needed).
 
@@ -102,7 +102,7 @@ async def run(a):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("fusion", help="fusion server tracks URL, e.g. ws://10.247.206.87:8000/tracks")
+    p.add_argument("fusion", help="fusion server tracks URL, e.g. ws://<server-ip>:8000/tracks")
     p.add_argument("--bridge", default="ws://127.0.0.1:8001/ingest", help="Role 1 bridge ingest URL")
     p.add_argument("--margin", type=float, default=0.75, help="metres outside the marker square still forwarded")
     p.add_argument("--print", action="store_true", help="print instead of sending to the bridge")
